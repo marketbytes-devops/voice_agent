@@ -1,0 +1,89 @@
+version: "3.8"
+
+services:
+  # 1. PostgreSQL with custom init
+  postgres:
+    image: postgres:16-alpine
+    container_name: clinicvoice-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: clinicvoice
+      POSTGRES_PASSWORD: clinicvoice_pass
+      POSTGRES_DB: clinicvoice_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U clinicvoice -d clinicvoice_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # 2. Redis for task queues and caching
+  redis:
+    image: redis:7-alpine
+    container_name: clinicvoice-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # 3. MinIO S3-Compatible Storage for Call Recordings
+  minio:
+    image: minio/minio:latest
+    container_name: clinicvoice-minio
+    restart: unless-stopped
+    ports:
+      - "9000:9000" # S3 API
+      - "9001:9001" # Web Console UI
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # Auto-create S3 bucket on startup
+  createbuckets:
+    image: minio/mc:latest
+    container_name: clinicvoice-minio-setup
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      /usr/bin/mc alias set myminio http://minio:9000 minioadmin minioadmin;
+      /usr/bin/mc mb --ignore-existing myminio/clinicvoice-recordings;
+      /usr/bin/mc anonymous set none myminio/clinicvoice-recordings;
+      exit 0;
+      "
+
+  # 4. LiveKit WebRTC / SIP Audio Server
+  livekit:
+    image: livekit/livekit-server:v1.8
+    container_name: clinicvoice-livekit
+    restart: unless-stopped
+    ports:
+      - "7880:7880" # WebRTC signal
+      - "7881:7881" # TCP traffic
+      - "7882:7882/udp" # UDP audio
+    environment:
+      LIVEKIT_KEYS: "devkey: secret"
+    command: --dev
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:

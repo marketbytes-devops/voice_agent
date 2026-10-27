@@ -1,0 +1,16 @@
+.env
+.env.local
+.env.*.local
+*.pyc
+__pycache__/
+.venv/
+venv/
+node_modules/
+.next/
+dist/
+build/
+*.wav
+!frontend/public/audio/*.wav
+cloudflared.exe
+.pytest_cache/
+

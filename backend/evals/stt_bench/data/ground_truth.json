@@ -1,0 +1,40 @@
+[
+  {
+    "audio_file": "sample_01.wav",
+    "language": "ml-IN",
+    "reference": "നമസ്കാരം എനിക്ക് നാളെ ഡോക്ടർ മനോജിനെ കാണാൻ ഒരു അപ്പോയിന്റ്മെന്റ് വേണം",
+    "entities": {
+      "doctor": "മനോജ്",
+      "date": "നാളെ"
+    }
+  },
+  {
+    "audio_file": "sample_02.wav",
+    "language": "ml-IN",
+    "reference": "എന്റെ പേര് അനന്തകൃഷ്ണൻ ഫോൺ നമ്പർ ഒൻപത് എട്ട് ഏഴ് ആറ് അഞ്ച് നാല് മൂന്ന് രണ്ട് ഒന്ന് പൂജ്യം ആലപ്പുഴയിൽ നിന്നാണ്",
+    "entities": {
+      "name": "അനന്തകൃഷ്ണൻ",
+      "phone": "9876543210",
+      "place": "ആലപ്പുഴ"
+    }
+  },
+  {
+    "audio_file": "sample_03.wav",
+    "language": "en-IN",
+    "reference": "Hello I want to book an appointment with Dr Manoj tomorrow at 10 AM my name is Rahul",
+    "entities": {
+      "doctor": "Manoj",
+      "name": "Rahul",
+      "time": "10 AM"
+    }
+  },
+  {
+    "audio_file": "sample_04.wav",
+    "language": "ml-IN",
+    "reference": "ഡോക്ടർക്ക് കൺസൾട്ടേഷൻ ഫീസ് എത്രയാണ് പഞ്ചകർമ്മ ചികിത്സ ഇവിടെ ഉണ്ടോ",
+    "entities": {
+      "query_type": "ഫീസ്",
+      "treatment": "പഞ്ചകർമ്മ"
+    }
+  }
+]
