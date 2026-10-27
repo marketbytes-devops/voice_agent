@@ -124,8 +124,11 @@ async def handle_exotel_call_status(
 
 def _load_pcm_greeting() -> bytes:
     """Load pre-rendered 8kHz 16-bit mono PCM greeting."""
+    base_dir = Path(__file__).resolve().parents[3]
     audio_paths = [
+        base_dir / "frontend" / "public" / "audio" / "hospital_welcome_ml.wav",
         Path("frontend/public/audio/hospital_welcome_ml.wav"),
+        base_dir / "frontend" / "public" / "audio" / "live_hospital_sample.wav",
         Path("frontend/public/audio/live_hospital_sample.wav"),
     ]
     for p in audio_paths:
