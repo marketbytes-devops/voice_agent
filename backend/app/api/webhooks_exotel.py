@@ -261,6 +261,7 @@ async def handle_exotel_voicebot_websocket(websocket: WebSocket) -> None:
 
         is_speaking = False
         is_greeting = False
+        logger.info("Exotel Voicebot: Audio playback completed for StreamSid=%s. Ready and listening...", sid)
 
     async def process_caller_speech() -> None:
         """Transcribe caller speech via Sarvam STT, query Gemini LLM, and stream reply."""
@@ -414,13 +415,18 @@ async def handle_exotel_voicebot_websocket(websocket: WebSocket) -> None:
                 logger.info("Exotel Voicebot session stopped for StreamSid=%s", stream_sid)
                 break
 
-    except WebSocketDisconnect:
-        logger.info("Exotel Voicebot: Caller disconnected WebSocket for StreamSid=%s", stream_sid)
+    except WebSocketDisconnect as e:
+        logger.warning(
+            "Exotel Voicebot: WebSocketDisconnect received (code=%s, reason=%s) for StreamSid=%s",
+            e.code,
+            getattr(e, "reason", None),
+            stream_sid,
+        )
     except Exception as e:
-        logger.error("Exotel Voicebot WebSocket error: %s", e)
+        logger.error("Exotel Voicebot: Unexpected error in WebSocket loop: %s", e, exc_info=True)
     finally:
         if silence_timer_task and not silence_timer_task.done():
             silence_timer_task.cancel()
-        logger.info("Exotel Voicebot: Session closed for CallSid=%s", call_sid)
+        logger.info("Exotel Voicebot: Session closed for CallSid=%s StreamSid=%s", call_sid, stream_sid)
 
 

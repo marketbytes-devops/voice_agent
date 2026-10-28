@@ -31,19 +31,41 @@ class SensitiveDataFilter(logging.Filter):
         return True
 
 
+import collections
+
+RECENT_LOGS: collections.deque[str] = collections.deque(maxlen=250)
+
+
+class MemoryLogHandler(logging.Handler):
+    """Stores recent logs in memory for live cloud diagnostics."""
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            msg = self.format(record)
+            RECENT_LOGS.append(msg)
+        except Exception:
+            pass
+
+
 def setup_logging(log_level: str = "INFO") -> logging.Logger:
     logger = logging.getLogger("clinicvoice")
     logger.setLevel(getattr(logging, log_level.upper(), logging.INFO))
 
     if not logger.handlers:
-        handler = logging.StreamHandler(sys.stdout)
         formatter = logging.Formatter(
             fmt="%(asctime)s [%(levelname)s] [%(name)s] %(message)s",
             datefmt="%Y-%m-%d %H:%M:%S",
         )
+
+        handler = logging.StreamHandler(sys.stdout)
         handler.setFormatter(formatter)
         handler.addFilter(SensitiveDataFilter())
         logger.addHandler(handler)
+
+        mem_handler = MemoryLogHandler()
+        mem_handler.setFormatter(formatter)
+        mem_handler.addFilter(SensitiveDataFilter())
+        logger.addHandler(mem_handler)
 
     return logger
 

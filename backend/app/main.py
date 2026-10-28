@@ -59,4 +59,13 @@ async def root() -> dict[str, str]:
         "app": settings.APP_NAME,
         "docs": "/docs",
         "health": "/health",
+        "logs": "/debug/logs",
     }
+
+
+@app.get("/debug/logs")
+async def get_debug_logs() -> dict[str, list[str]]:
+    """Return recent technical log records for live deployment diagnostics."""
+    from backend.app.core.logging import RECENT_LOGS
+    return {"logs": list(RECENT_LOGS)}
+
