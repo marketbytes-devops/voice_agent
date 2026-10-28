@@ -14,7 +14,8 @@ class SarvamTTSAdapter:
     name = "sarvam_bulbul"
 
     def __init__(self, api_key: str | None = None) -> None:
-        self.api_key = api_key or os.getenv("SARVAM_API_KEY")
+        from backend.app.core.config import settings
+        self.api_key = api_key or os.getenv("SARVAM_API_KEY") or settings.SARVAM_API_KEY
 
     def voice_for(self, language: str) -> str:
         # Default Malayalam female voice in bulbul:v3: kavya or anushka

@@ -14,7 +14,8 @@ class SarvamSTTAdapter:
     languages = ["ml-IN", "en-IN"]
 
     def __init__(self, api_key: str | None = None) -> None:
-        self.api_key = api_key or os.getenv("SARVAM_API_KEY")
+        from backend.app.core.config import settings
+        self.api_key = api_key or os.getenv("SARVAM_API_KEY") or settings.SARVAM_API_KEY
 
     async def transcribe(self, audio_data: bytes, language: str = "ml-IN") -> str:
         if not self.api_key:
@@ -24,9 +25,13 @@ class SarvamSTTAdapter:
         url = "https://api.sarvam.ai/speech-to-text"
         headers = {"api-subscription-key": self.api_key}
         files = {"file": ("audio.wav", audio_data, "audio/wav")}
-        data = {"language_code": language, "model": "saaras:v1"}
+        data = {"language_code": language, "model": "saaras:v3"}
 
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.post(url, headers=headers, files=files, data=data)
-            resp.raise_for_status()
-            return resp.json().get("transcript", "")
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.post(url, headers=headers, files=files, data=data)
+                resp.raise_for_status()
+                return resp.json().get("transcript", "")
+        except Exception as e:
+            logger.error("Sarvam STT failed: %s", e)
+            return ""

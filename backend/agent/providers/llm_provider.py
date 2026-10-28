@@ -23,6 +23,51 @@ class LLMAdapter:
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
     ) -> tuple[str | None, list[dict[str, Any]]]:
+        from backend.app.core.config import settings
+
+        gemini_key = os.getenv("GEMINI_API_KEY") or settings.GEMINI_API_KEY
+        if gemini_key:
+            system_prompt = next((m["content"] for m in messages if m["role"] == "system"), "")
+            user_msg = messages[-1]["content"] if messages else ""
+
+            hospital_context = (
+                "You are the warm, polite Malayalam voice receptionist at Sreerudra Ayurveda Hospital & Research Centre, Alappuzha.\n"
+                "Hospital Information:\n"
+                "- Lead Doctor: Dr. Manoj (BAMS, MD Ayurveda, Specialist in Panchakarma & General Ayurveda).\n"
+                "- Working Hours: Monday to Saturday, 9:00 AM to 5:00 PM.\n"
+                "- Available appointment slots tomorrow: 10:00 AM, 11:30 AM, 2:30 PM, and 4:00 PM.\n"
+                "- Treatments offered: Panchakarma, Arthritis & Spine care, Rejuvenation therapy, General consultations.\n"
+                "Guardrails:\n"
+                "1. Reply in 1-2 short, spoken sentences in natural Malayalam suited for telephone conversation.\n"
+                "2. If the caller asks if Dr. Manoj is available tomorrow or wants an appointment, confirm he is available and ask which time slot (10:00 AM, 11:30 AM, 2:30 PM, or 4:00 PM) suits them best.\n"
+                "3. Never prescribe or invent medicines. For emergency chest pain/breathing trouble, advise immediate emergency care.\n"
+            )
+
+            # Build conversation history snippet
+            recent_turns = []
+            for m in messages[-4:]:
+                role = "Caller" if m["role"] == "user" else "Assistant"
+                recent_turns.append(f"{role}: {m['content']}")
+            history_str = "\n".join(recent_turns)
+
+            combined_prompt = f"{hospital_context}\n\nConversation so far:\n{history_str}\n\nCaller: {user_msg}\nAssistant (in 1-2 spoken Malayalam sentences):"
+
+            try:
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key={gemini_key}"
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    resp = await client.post(url, json={"contents": [{"parts": [{"text": combined_prompt}]}]})
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        parts = data.get("candidates", [{}])[0].get("content", {}).get("parts", [])
+                        for p in parts:
+                            if "text" in p and not p.get("thought", False):
+                                text = p["text"].strip()
+                                if text:
+                                    logger.info("Gemini LLM generated reply: %s", text)
+                                    return text, []
+            except Exception as e:
+                logger.warning("Gemini LLM call failed, falling back to local clinical rules: %s", e)
+
         if not self.api_key:
             # Deterministic mock rule response for local testing
             last_msg = messages[-1]["content"].lower() if messages else ""
@@ -33,34 +78,15 @@ class LLMAdapter:
                     [],
                 )
             if "നെഞ്ചിൽ" in last_msg or "ശ്വാസം" in last_msg or "emergency" in last_msg:
-                return None, [
-                    {"name": "escalate_emergency", "arguments": {"summary": "Caller reported severe distress"}}
-                ]
-            if "slot" in last_msg or "സമയം" in last_msg or "ഡോക്ടർ" in last_msg or "നാളെ" in last_msg or "അപ്പോയിന്റ്മെന്റ്" in last_msg:
-                return None, [
-                    {"name": "get_free_slots", "arguments": {"date": "tomorrow"}}
-                ]
-
-            gemini_key = os.getenv("GEMINI_API_KEY")
-            if gemini_key:
-                system_prompt = next((m["content"] for m in messages if m["role"] == "system"), "")
-                user_msg = messages[-1]["content"] if messages else ""
-                combined_prompt = (
-                    f"{system_prompt}\n\nCaller says: {user_msg}\n"
-                    "Reply concisely in 1-2 conversational sentences in natural Malayalam as the hospital receptionist."
+                return (
+                    "അടിയന്തിര സാഹചര്യങ്ങളിൽ ദയവായി തൊട്ടടുത്തുള്ള ആശുപത്രിയിലെ എമർജൻസി വിഭാഗത്തിൽ ഉടൻ ചികിത്സ തേടുക.",
+                    [],
                 )
-                try:
-                    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key={gemini_key}"
-                    async with httpx.AsyncClient(timeout=15.0) as client:
-                        resp = await client.post(url, json={"contents": [{"parts": [{"text": combined_prompt}]}]})
-                        if resp.status_code == 200:
-                            data = resp.json()
-                            parts = data.get("candidates", [{}])[0].get("content", {}).get("parts", [])
-                            for p in parts:
-                                if "text" in p and not p.get("thought", False):
-                                    return p["text"].strip(), []
-                except Exception as e:
-                    logger.warning("Gemini LLM call failed: %s", e)
+            if "മനോജ്" in last_msg or "ഡോക്ടർ" in last_msg or "നാളെ" in last_msg or "ലഭ്യമാണോ" in last_msg:
+                return (
+                    "അതെ, ഡോക്ടർ മനോജ് നാളെ ലഭ്യമാണ്. രാവിലെ പത്ത് മണിക്കും, പതിനൊന്നരയ്ക്കും, ഉച്ചയ്ക്ക് രണ്ടരയ്ക്കും സ്ലോട്ടുകൾ ലഭ്യമാണ്. ഏത് സമയമാണ് സൗകര്യം?",
+                    [],
+                )
 
             return "നമസ്കാരം, ശ്രീരുദ്ര ആയുർവേദ ഹോസ്പിറ്റലിലേക്ക് സ്വാഗതം. ഞാൻ എങ്ങനെയാണ് സഹായിക്കേണ്ടത്?", []
 
