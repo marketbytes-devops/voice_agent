@@ -325,6 +325,10 @@ async def handle_exotel_voicebot_websocket(websocket: WebSocket) -> None:
             if not sentences:
                 sentences = [reply_text]
 
+            # Merge very short leading interjection (e.g. 'നമസ്കാരം!' or 'ശരി!') with next sentence
+            if len(sentences) > 1 and len(sentences[0]) < 22:
+                sentences = [sentences[0] + " " + sentences[1]] + sentences[2:]
+
             first_sentence = sentences[0]
             rest_sentence = " ".join(sentences[1:]).strip() if len(sentences) > 1 else ""
 
@@ -349,14 +353,25 @@ async def handle_exotel_voicebot_websocket(websocket: WebSocket) -> None:
                     pcm_rest = _to_raw_pcm(rest_audio)
                     await stream_audio_to_caller(pcm_rest, stream_sid, is_welcome=False)
 
+            # If the conversation turn signaled call completion (hangup), gracefully terminate call
+            turn_type = result.get("type", "speech")
+            if turn_type == "hangup" and stream_sid:
+                logger.info("Exotel Voicebot: Turn completed with hangup. Closing WebSocket to disconnect call.")
+                await asyncio.sleep(0.6)
+                try:
+                    await websocket.close()
+                except Exception:
+                    pass
+                return
+
         except Exception as e:
             logger.error("Exotel Voicebot: Error during conversation turn: %s", e)
         finally:
             is_processing_turn = False
 
     async def _silence_detector() -> None:
-        """Wait for 0.45s pause in caller speech before triggering turn processing."""
-        await asyncio.sleep(0.45)
+        """Wait for 0.38s pause in caller speech before triggering turn processing."""
+        await asyncio.sleep(0.38)
         await process_caller_speech()
 
     try:

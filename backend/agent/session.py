@@ -136,6 +136,20 @@ class CallSession:
                     elif call["name"] == "escalate_emergency":
                         reply_text = res.get("disclaimer_ml", "അടിയന്തിര സഹായം ലഭ്യമാക്കുന്നു.")
 
+        # Check if conversation reached completion (farewell/hangup)
+        is_hangup = False
+        if reply_text and "[END_CALL]" in reply_text:
+            reply_text = reply_text.replace("[END_CALL]", "").strip()
+            is_hangup = True
+
+        farewell_phrases = ["ശരി", "നന്ദി", "ഓക്കേ", "ഓകെ", "താങ്ക് യു", "താങ്ക്സ്", "ബൈ", "bye", "thank you", "thanks", "ok", "okay", "കാണാം"]
+        clean_caller = caller_text.strip().lower().replace(".", "").replace("!", "")
+        user_turn_count = len([m for m in self.messages if m["role"] == "user"])
+        if user_turn_count >= 2 and any(clean_caller == p or clean_caller == f"ശരി {p}" or clean_caller == f"{p} നന്ദി" for p in farewell_phrases):
+            is_hangup = True
+            if not reply_text or len(reply_text) < 5:
+                reply_text = "നന്ദി! ശ്രീരുദ്ര ആയുർവേദ ഹോസ്പിറ്റലിലേക്ക് വിളിച്ചതിന് നന്ദി, നല്ലൊരു ദിവസം ആശംസിക്കുന്നു!"
+
         if reply_text:
             self.messages.append({"role": "assistant", "content": reply_text})
             audio_bytes = None
@@ -144,7 +158,7 @@ class CallSession:
                 audio_bytes = await self.providers.tts.synthesize(reply_text, language=active_lang)
                 self.is_speaking = False
             return {
-                "type": "speech",
+                "type": "hangup" if is_hangup else "speech",
                 "text": reply_text,
                 "language": active_lang,
                 "tool_results": tool_results,
