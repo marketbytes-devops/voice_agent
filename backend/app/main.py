@@ -88,7 +88,22 @@ async def update_knowledge(payload: dict):
     from pathlib import Path
     kb_path = Path(__file__).resolve().parents[2] / "backend" / "agent" / "knowledge" / "hospital_knowledge.json"
     kb_path.parent.mkdir(parents=True, exist_ok=True)
-    kb_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
     return {"status": "ok", "message": "Hospital knowledge base updated successfully"}
+
+
+@app.get("/debug/keys")
+async def get_debug_keys():
+    """Verify whether API keys are loaded in production."""
+    import os
+    from backend.app.core.config import settings
+    sarvam = os.getenv("SARVAM_API_KEY") or settings.SARVAM_API_KEY
+    gemini = os.getenv("GEMINI_API_KEY") or settings.GEMINI_API_KEY
+    return {
+        "sarvam_configured": bool(sarvam),
+        "sarvam_length": len(sarvam) if sarvam else 0,
+        "gemini_configured": bool(gemini),
+        "gemini_length": len(gemini) if gemini else 0,
+    }
+
 
 
