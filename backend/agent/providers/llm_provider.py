@@ -42,6 +42,15 @@ class LLMAdapter:
     def __init__(self, api_key: str | None = None, model: str = "gpt-4o-mini") -> None:
         self.api_key = api_key or os.getenv("OPENAI_API_KEY") or os.getenv("LLM_API_KEY")
         self.model = model
+        self._client: httpx.AsyncClient | None = None
+
+    def _get_client(self) -> httpx.AsyncClient:
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.AsyncClient(
+                timeout=10.0,
+                limits=httpx.Limits(max_keepalive_connections=10, max_connections=20),
+            )
+        return self._client
 
     async def generate_response(
         self,
@@ -59,10 +68,11 @@ class LLMAdapter:
             hospital_context = (
                 "You are the warm, polite Malayalam voice receptionist at Sreerudra Ayurveda Hospital & Research Centre, Alappuzha.\n"
                 f"Hospital Knowledge Base:\n{kb_context}\n\n"
-                "Guardrails:\n"
-                "1. Reply in 1-2 short, spoken sentences in natural Malayalam suited for telephone conversation.\n"
-                "2. If the caller asks if Dr. Manoj is available tomorrow or wants an appointment, confirm he is available and ask which time slot (10:00 AM, 11:30 AM, 2:30 PM, or 4:00 PM) suits them best.\n"
-                "3. Never prescribe or invent medicines. For emergency chest pain/breathing trouble, advise immediate emergency care.\n"
+                "CRITICAL VOICE LATENCY RULES:\n"
+                "1. Reply in 1-2 short, spoken sentences in natural Malayalam suited for telephone conversation (maximum 15-20 words).\n"
+                "2. Answer directly without repeating long greetings or addresses every turn.\n"
+                "3. If the caller asks if Dr. Manoj is available tomorrow or wants an appointment, confirm he is available and ask which time slot (10:00 AM, 11:30 AM, 2:30 PM, or 4:00 PM) suits them best.\n"
+                "4. Never prescribe or invent medicines. For emergencies, advise immediate emergency care.\n"
             )
 
             # Build conversation history snippet
@@ -76,17 +86,24 @@ class LLMAdapter:
 
             try:
                 url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key={gemini_key}"
-                async with httpx.AsyncClient(timeout=10.0) as client:
-                    resp = await client.post(url, json={"contents": [{"parts": [{"text": combined_prompt}]}]})
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        parts = data.get("candidates", [{}])[0].get("content", {}).get("parts", [])
-                        for p in parts:
-                            if "text" in p and not p.get("thought", False):
-                                text = p["text"].strip()
-                                if text:
-                                    logger.info("Gemini LLM generated reply: %s", text)
-                                    return text, []
+                client = self._get_client()
+                payload = {
+                    "contents": [{"parts": [{"text": combined_prompt}]}],
+                    "generationConfig": {
+                        "maxOutputTokens": 65,
+                        "temperature": 0.2,
+                    },
+                }
+                resp = await client.post(url, json=payload)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    parts = data.get("candidates", [{}])[0].get("content", {}).get("parts", [])
+                    for p in parts:
+                        if "text" in p and not p.get("thought", False):
+                            text = p["text"].strip()
+                            if text:
+                                logger.info("Gemini LLM generated reply: %s", text)
+                                return text, []
             except Exception as e:
                 logger.warning("Gemini LLM call failed, falling back to local clinical rules: %s", e)
 

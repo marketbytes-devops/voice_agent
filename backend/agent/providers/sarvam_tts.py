@@ -16,6 +16,15 @@ class SarvamTTSAdapter:
     def __init__(self, api_key: str | None = None) -> None:
         from backend.app.core.config import settings
         self.api_key = api_key or os.getenv("SARVAM_API_KEY") or settings.SARVAM_API_KEY
+        self._client: httpx.AsyncClient | None = None
+
+    def _get_client(self) -> httpx.AsyncClient:
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.AsyncClient(
+                timeout=15.0,
+                limits=httpx.Limits(max_keepalive_connections=10, max_connections=20),
+            )
+        return self._client
 
     def voice_for(self, language: str) -> str:
         # Default Malayalam female voice in bulbul:v3: kavya or anushka
@@ -48,10 +57,11 @@ class SarvamTTSAdapter:
             "speaker": speaker,
             "speech_sample_rate": 8000,
             "model": "bulbul:v3",
+            "pace": 1.05,
         }
 
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.post(url, headers=headers, json=payload)
-            resp.raise_for_status()
-            audios = resp.json().get("audios", [])
-            return base64.b64decode(audios[0]) if audios else b""
+        client = self._get_client()
+        resp = await client.post(url, headers=headers, json=payload)
+        resp.raise_for_status()
+        audios = resp.json().get("audios", [])
+        return base64.b64decode(audios[0]) if audios else b""

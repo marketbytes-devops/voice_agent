@@ -54,14 +54,18 @@ class CallSession:
         else:
             self.messages[0] = {"role": "system", "content": sys_prompt}
 
-    async def handle_caller_utterance(self, caller_text: str) -> dict[str, Any]:
+    async def handle_caller_utterance(
+        self,
+        caller_text: str,
+        synthesize_audio: bool = True,
+    ) -> dict[str, Any]:
         """
         Process a single speech turn from caller:
         1. Check interruption (if agent was speaking, immediately stop)
         2. Detect & switch language if needed
         3. Send context to LLM with tools
         4. Execute any tools returned
-        5. Generate audio via TTS
+        5. Generate audio via TTS (optional for streaming pipelines)
         """
         if not caller_text.strip():
             self.consecutive_silence_count += 1
@@ -134,10 +138,11 @@ class CallSession:
 
         if reply_text:
             self.messages.append({"role": "assistant", "content": reply_text})
-            # Synthesize audio bytes via TTS
-            self.is_speaking = True
-            audio_bytes = await self.providers.tts.synthesize(reply_text, language=active_lang)
-            self.is_speaking = False
+            audio_bytes = None
+            if synthesize_audio:
+                self.is_speaking = True
+                audio_bytes = await self.providers.tts.synthesize(reply_text, language=active_lang)
+                self.is_speaking = False
             return {
                 "type": "speech",
                 "text": reply_text,

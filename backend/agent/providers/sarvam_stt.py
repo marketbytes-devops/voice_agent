@@ -16,6 +16,15 @@ class SarvamSTTAdapter:
     def __init__(self, api_key: str | None = None) -> None:
         from backend.app.core.config import settings
         self.api_key = api_key or os.getenv("SARVAM_API_KEY") or settings.SARVAM_API_KEY
+        self._client: httpx.AsyncClient | None = None
+
+    def _get_client(self) -> httpx.AsyncClient:
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.AsyncClient(
+                timeout=15.0,
+                limits=httpx.Limits(max_keepalive_connections=10, max_connections=20),
+            )
+        return self._client
 
     async def transcribe(self, audio_data: bytes, language: str = "ml-IN") -> str:
         if not self.api_key:
@@ -29,10 +38,10 @@ class SarvamSTTAdapter:
         data = {"language_code": language, "model": "saaras:v3"}
 
         try:
-            async with httpx.AsyncClient(timeout=15.0) as client:
-                resp = await client.post(url, headers=headers, files=files, data=data)
-                resp.raise_for_status()
-                return resp.json().get("transcript", "")
+            client = self._get_client()
+            resp = await client.post(url, headers=headers, files=files, data=data)
+            resp.raise_for_status()
+            return resp.json().get("transcript", "")
         except Exception as e:
             logger.error("Sarvam STT failed: %s", e)
             return ""

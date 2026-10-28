@@ -207,6 +207,7 @@ async def handle_exotel_voicebot_websocket(websocket: WebSocket) -> None:
     is_speaking = False
     is_processing_turn = False
     is_greeting = False
+    was_interrupted = False
     silence_timer_task: asyncio.Task | None = None
     speech_start_time: float = 0.0
 
@@ -222,8 +223,8 @@ async def handle_exotel_voicebot_websocket(websocket: WebSocket) -> None:
 
         chunks = [raw_pcm[i : i + chunk_size] for i in range(0, len(raw_pcm), chunk_size)]
         
-        # Pre-buffer: burst first 3 chunks (300ms) immediately to prevent carrier jitter buffer underrun
-        burst_count = min(3, len(chunks))
+        # Pre-buffer: burst first 4 chunks (400ms) immediately to prevent carrier jitter buffer underrun
+        burst_count = min(4, len(chunks))
         for i in range(burst_count):
             if not is_speaking and not is_welcome:
                 break
@@ -241,7 +242,7 @@ async def handle_exotel_voicebot_websocket(websocket: WebSocket) -> None:
                 is_greeting = False
                 return
 
-        # Paced delivery for remaining chunks (80ms interval ensures carrier buffer never starves)
+        # Paced delivery for remaining chunks (75ms interval ensures carrier buffer never starves)
         for i in range(burst_count, len(chunks)):
             # Never interrupt the initial welcome introduction greeting
             if not is_speaking and not is_welcome:
@@ -256,28 +257,29 @@ async def handle_exotel_voicebot_websocket(websocket: WebSocket) -> None:
             }
             try:
                 await websocket.send_text(json.dumps(msg))
-                await asyncio.sleep(0.080)
+                await asyncio.sleep(0.075)
             except Exception:
                 break
 
         is_speaking = False
         is_greeting = False
-        logger.info("Exotel Voicebot: Audio playback completed for StreamSid=%s. Ready and listening...", sid)
+        logger.info("Exotel Voicebot: Audio playback completed for StreamSid=%s.", sid)
 
     async def process_caller_speech() -> None:
-        """Transcribe caller speech via Sarvam STT, query Gemini LLM, and stream reply."""
-        nonlocal is_processing_turn, has_spoken, speech_start_time
+        """Transcribe caller speech via Sarvam STT, query Gemini LLM, and stream reply with pipelined TTS."""
+        nonlocal is_processing_turn, has_spoken, speech_start_time, was_interrupted
         if is_processing_turn or not caller_pcm_buffer:
             return
 
         is_processing_turn = True
         has_spoken = False
+        was_interrupted = False
         speech_start_time = 0.0
         raw_pcm = b"".join(caller_pcm_buffer)
         caller_pcm_buffer.clear()
 
-        # Ignore brief noise clicks (< 0.35s)
-        if len(raw_pcm) < 8000 * 2 * 0.35:
+        # Ignore brief noise clicks (< 0.30s)
+        if len(raw_pcm) < 8000 * 2 * 0.30:
             is_processing_turn = False
             return
 
@@ -292,13 +294,13 @@ async def handle_exotel_voicebot_websocket(websocket: WebSocket) -> None:
             wav_bytes = header + raw_pcm
 
             # 1. Transcribe caller audio with Sarvam AI STT (Saaras v3)
-            logger.info("Exotel Voicebot: Transcribing %d bytes of caller audio via Sarvam STT...", len(wav_bytes))
+            t_stt = time.time()
             transcript = await providers.stt.transcribe(wav_bytes, language="ml-IN")
             transcript = transcript.strip()
+            logger.info("Exotel Voicebot: Sarvam STT completed in %.2fs. Transcript: '%s'", time.time() - t_stt, transcript)
 
             if not transcript:
                 logger.info("Exotel Voicebot: Empty transcription, asking caller to repeat.")
-                # Give a gentle verbal prompt instead of dead silence
                 repeat_text = "ക്ഷമിക്കണം, വ്യക്തമായി കേട്ടില്ല. ഒന്നുകൂടി പറയാമോ?"
                 audio_bytes = await providers.tts.synthesize(repeat_text, language="ml-IN")
                 if audio_bytes and stream_sid:
@@ -306,25 +308,46 @@ async def handle_exotel_voicebot_websocket(websocket: WebSocket) -> None:
                 is_processing_turn = False
                 return
 
-            logger.info("Exotel Voicebot: Caller spoken: '%s'", transcript)
-
-            # 2. Process utterance via CallSession (Gemini LLM)
-            result = await session.handle_caller_utterance(transcript)
+            # 2. Process utterance via CallSession (Gemini LLM) without blocking TTS inside session
+            t_llm = time.time()
+            result = await session.handle_caller_utterance(transcript, synthesize_audio=False)
             reply_text = result.get("text", "")
-            audio_bytes = result.get("audio_bytes")
+            logger.info("Exotel Voicebot: Gemini LLM generated reply in %.2fs: '%s'", time.time() - t_llm, reply_text)
 
-            # Fallback synthesis if session didn't produce audio_bytes
-            if not audio_bytes and reply_text:
-                logger.info("Synthesizing reply text via Sarvam TTS: %s", reply_text)
-                audio_bytes = await providers.tts.synthesize(reply_text, language="ml-IN")
+            if not reply_text or not stream_sid:
+                is_processing_turn = False
+                return
 
-            logger.info("Exotel Voicebot: AI generated reply: '%s'", reply_text)
+            # 3. Pipelined Sentence-by-Sentence Streaming TTS
+            # Split reply into sentences to deliver first audio chunk to phone in under ~1 second!
+            import re
+            sentences = [s.strip() for s in re.split(r"(?<=[.?!।\n])\s+", reply_text) if s.strip()]
+            if not sentences:
+                sentences = [reply_text]
 
-            # 3. Stream reply audio to caller's phone
-            if audio_bytes and stream_sid:
-                pcm_out = _to_raw_pcm(audio_bytes)
-                logger.info("Exotel Voicebot: Streaming %d bytes of reply audio to caller...", len(pcm_out))
-                await stream_audio_to_caller(pcm_out, stream_sid, is_welcome=False)
+            first_sentence = sentences[0]
+            rest_sentence = " ".join(sentences[1:]).strip() if len(sentences) > 1 else ""
+
+            # Concurrently dispatch background TTS task for second sentence (if present)
+            rest_task: asyncio.Task | None = None
+            if rest_sentence:
+                rest_task = asyncio.create_task(providers.tts.synthesize(rest_sentence, language="ml-IN"))
+
+            # Synthesize first sentence immediately
+            t_tts = time.time()
+            first_audio = await providers.tts.synthesize(first_sentence, language="ml-IN")
+            logger.info("First sentence TTS ready in %.2fs (%d chars, %d bytes)", time.time() - t_tts, len(first_sentence), len(first_audio))
+
+            if first_audio and stream_sid and not was_interrupted:
+                pcm_first = _to_raw_pcm(first_audio)
+                await stream_audio_to_caller(pcm_first, stream_sid, is_welcome=False)
+
+            # Stream remaining sentences smoothly if caller hasn't interrupted
+            if rest_task and stream_sid and not was_interrupted:
+                rest_audio = await rest_task
+                if rest_audio and not was_interrupted:
+                    pcm_rest = _to_raw_pcm(rest_audio)
+                    await stream_audio_to_caller(pcm_rest, stream_sid, is_welcome=False)
 
         except Exception as e:
             logger.error("Exotel Voicebot: Error during conversation turn: %s", e)
@@ -332,8 +355,8 @@ async def handle_exotel_voicebot_websocket(websocket: WebSocket) -> None:
             is_processing_turn = False
 
     async def _silence_detector() -> None:
-        """Wait for 0.8s pause in caller speech before triggering turn processing."""
-        await asyncio.sleep(0.8)
+        """Wait for 0.45s pause in caller speech before triggering turn processing."""
+        await asyncio.sleep(0.45)
         await process_caller_speech()
 
     try:
@@ -384,6 +407,7 @@ async def handle_exotel_voicebot_websocket(websocket: WebSocket) -> None:
                     # Interruption check: halt playback only if bot is speaking responses (never during welcome greeting)
                     if is_speaking and not is_greeting and rms > 650.0:
                         logger.info("Exotel Voicebot: Caller interrupted AI mid-playback (RMS=%.1f).", rms)
+                        was_interrupted = True
                         is_speaking = False
 
                     # Only capture caller speech when bot is not playing audio
