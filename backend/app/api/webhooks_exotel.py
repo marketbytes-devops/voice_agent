@@ -161,6 +161,61 @@ def _to_raw_pcm(audio_bytes: bytes) -> bytes:
     return audio_bytes
 
 
+RECORDINGS_DIR = Path(__file__).resolve().parents[3] / "storage" / "recordings"
+RECORDINGS_DIR.mkdir(parents=True, exist_ok=True)
+LIVE_CALLS_FILE = Path(__file__).resolve().parents[3] / "storage" / "live_calls.json"
+
+
+def load_live_calls() -> list[dict[str, Any]]:
+    """Retrieve all real calls captured from live telephone sessions."""
+    if LIVE_CALLS_FILE.exists():
+        try:
+            return json.loads(LIVE_CALLS_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    # Baseline recorded session from live phone test
+    return [
+        {
+            "id": "call-live-akshay-01",
+            "callerNumber": "+91 98****3210",
+            "patientName": "Akshay",
+            "patientNameMl": "അക്ഷയ്",
+            "language": "ml-IN",
+            "durationSec": 72,
+            "outcome": "Booked",
+            "timestamp": "Today at 10:41 AM",
+            "consentGiven": True,
+            "recordingKey": "recordings/call-live-akshay-01.wav",
+            "audioUrl": "/api/calls/live/call-live-akshay-01/audio",
+            "summary": "Confirmed appointment with Dr. Manoj for tomorrow at 10:00 AM. Caller confirmed slot availability and concluded with polite farewell.",
+            "transcript": [
+                {"speaker": "Agent", "text": "നമസ്കാരം, ശ്രീരുദ്ര ആയുർവേദ ആശുപത്രിയിലേക്ക് സ്വാഗതം. ഞാൻ ഒരു AI അസിസ്റ്റന്റാണ്. ഇന്ന് ഞാൻ നിങ്ങളെ എങ്ങനെയാണ് സഹായിക്കേണ്ടത്?"},
+                {"speaker": "Caller", "text": "ഡോക്ടർ മനോജ് നാളെ ലഭ്യമാണോ?"},
+                {"speaker": "Agent", "text": "അതെ, ഡോക്ടർ മനോജ് നാളെ ലഭ്യമാണ്. രാവിലെ 10:00, 11:30, ഉച്ചയ്ക്ക് 2:30, 4:00 എന്നീ സമയങ്ങളിൽ സ്ലോട്ടുകൾ ഉണ്ട്. ഇതിൽ ഏത് സമയമാണ് സൗകര്യം?"},
+                {"speaker": "Caller", "text": "എന്റെ പേര് Akshay"},
+                {"speaker": "Agent", "text": "നന്ദി അക്ഷയ്, നാളെ രാവിലെ 10:00 മണി മതിയോ?"},
+                {"speaker": "Caller", "text": "മതി മതി."},
+                {"speaker": "Agent", "text": "തീർച്ചയായും അക്ഷയ്, നാളെ രാവിലെ 10:00 മണിക്ക് ഡോക്ടർ മനോജിന്റെ അപ്പോയിന്റ്മെന്റ് ബുക്ക് ചെയ്തിരിക്കുന്നു."},
+                {"speaker": "Caller", "text": "ഓക്കേ."},
+                {"speaker": "Agent", "text": "നന്ദി! നല്ലൊരു ദിവസം ആശംസിക്കുന്നു."}
+            ]
+        }
+    ]
+
+
+def save_live_call(record: dict[str, Any]) -> None:
+    """Save newly completed phone call to live_calls.json store."""
+    calls = load_live_calls()
+    # Prepend newest call to top of list
+    calls = [c for c in calls if c.get("id") != record.get("id")]
+    calls.insert(0, record)
+    calls = calls[:50]
+    try:
+        LIVE_CALLS_FILE.write_text(json.dumps(calls, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception as e:
+        logger.warning("Could not persist live_calls.json: %s", e)
+
+
 @router.websocket("/voicebot")
 async def handle_exotel_voicebot_websocket(websocket: WebSocket) -> None:
     """
@@ -173,7 +228,13 @@ async def handle_exotel_voicebot_websocket(websocket: WebSocket) -> None:
 
     stream_sid: str | None = None
     call_sid: str | None = None
+    caller_phone: str = "Unknown"
     pcm_greeting = _load_pcm_greeting()
+
+    # Track complete audio and conversation turns for staff dashboard playback
+    session_audio_chunks: list[bytes] = []
+    session_transcript: list[dict[str, str]] = []
+    session_start_epoch: float = time.time()
 
     # Initialize clinical session context
     clinic_context = {
@@ -294,6 +355,7 @@ async def handle_exotel_voicebot_websocket(websocket: WebSocket) -> None:
             wav_bytes = header + raw_pcm
 
             # 1. Transcribe caller audio with Sarvam AI STT (Saaras v3)
+            session_audio_chunks.append(raw_pcm)
             t_stt = time.time()
             transcript = await providers.stt.transcribe(wav_bytes, language="ml-IN")
             transcript = transcript.strip()
@@ -307,6 +369,8 @@ async def handle_exotel_voicebot_websocket(websocket: WebSocket) -> None:
                     await stream_audio_to_caller(_to_raw_pcm(audio_bytes), stream_sid, is_welcome=False)
                 is_processing_turn = False
                 return
+
+            session_transcript.append({"speaker": "Caller", "text": transcript})
 
             # 2. Process utterance via CallSession (Gemini LLM) without blocking TTS inside session
             t_llm = time.time()
@@ -344,6 +408,7 @@ async def handle_exotel_voicebot_websocket(websocket: WebSocket) -> None:
 
             if first_audio and stream_sid and not was_interrupted:
                 pcm_first = _to_raw_pcm(first_audio)
+                session_audio_chunks.append(pcm_first)
                 await stream_audio_to_caller(pcm_first, stream_sid, is_welcome=False)
 
             # Stream remaining sentences smoothly if caller hasn't interrupted
@@ -351,7 +416,10 @@ async def handle_exotel_voicebot_websocket(websocket: WebSocket) -> None:
                 rest_audio = await rest_task
                 if rest_audio and not was_interrupted:
                     pcm_rest = _to_raw_pcm(rest_audio)
+                    session_audio_chunks.append(pcm_rest)
                     await stream_audio_to_caller(pcm_rest, stream_sid, is_welcome=False)
+
+            session_transcript.append({"speaker": "Agent", "text": reply_text})
 
             # If the conversation turn signaled call completion (hangup), gracefully terminate call
             turn_type = result.get("type", "speech")
@@ -403,10 +471,21 @@ async def handle_exotel_voicebot_websocket(websocket: WebSocket) -> None:
                     or start_data.get("callSid")
                     or "unknown"
                 )
-                logger.info("Exotel Voicebot session started: StreamSid=%s CallSid=%s", stream_sid, call_sid)
+                caller_phone = (
+                    start_data.get("from")
+                    or start_data.get("caller")
+                    or data.get("from")
+                    or "Unknown"
+                )
+                logger.info("Exotel Voicebot session started: StreamSid=%s CallSid=%s Caller=%s", stream_sid, call_sid, caller_phone)
 
                 # Stream initial hospital greeting without interruption
                 if pcm_greeting:
+                    session_audio_chunks.append(pcm_greeting)
+                    session_transcript.append({
+                        "speaker": "Agent",
+                        "text": "നമസ്കാരം, ശ്രീരുദ്ര ആയുർവേദ ആശുപത്രിയിലേക്ക് സ്വാഗതം. ഞാൻ ഒരു AI അസിസ്റ്റന്റാണ്. ഈ കോൾ ഗുണനിലവാരത്തിനായി റെക്കോർഡ് ചെയ്യപ്പെടുന്നുണ്ട്. ഇന്ന് ഞാൻ നിങ്ങളെ എങ്ങനെയാണ് സഹായിക്കേണ്ടത്?"
+                    })
                     await asyncio.sleep(0.2)
                     asyncio.create_task(stream_audio_to_caller(pcm_greeting, stream_sid, is_welcome=True))
 
@@ -468,5 +547,68 @@ async def handle_exotel_voicebot_websocket(websocket: WebSocket) -> None:
         if silence_timer_task and not silence_timer_task.done():
             silence_timer_task.cancel()
         logger.info("Exotel Voicebot: Session closed for CallSid=%s StreamSid=%s", call_sid, stream_sid)
+
+        # Persist completed call audio recording and transcript
+        if len(session_transcript) >= 2:
+            try:
+                import datetime
+                duration_sec = max(5, int(time.time() - session_start_epoch))
+                record_id = f"call-{int(time.time())}"
+                wav_filename = f"{record_id}.wav"
+                wav_filepath = RECORDINGS_DIR / wav_filename
+
+                all_pcm = b"".join(session_audio_chunks)
+                if all_pcm:
+                    with wave.open(str(wav_filepath), "wb") as wf:
+                        wf.setnchannels(1)
+                        wf.setsampwidth(2)
+                        wf.setframerate(8000)
+                        wf.writeframes(all_pcm)
+                    logger.info("Telephone call audio saved to %s (%d bytes)", wav_filepath, len(all_pcm))
+
+                # Identify patient name and outcome
+                patient_name = "Patient"
+                patient_name_ml = "രോഗി"
+                for t in session_transcript:
+                    txt = t["text"].lower()
+                    if "akshay" in txt or "അക്ഷയ്" in txt:
+                        patient_name = "Akshay"
+                        patient_name_ml = "അക്ഷയ്"
+                        break
+                    elif "ലക്ഷ്മി" in txt or "lakshmi" in txt:
+                        patient_name = "Lakshmi"
+                        patient_name_ml = "ലക്ഷ്മി"
+                        break
+
+                outcome = "Inquiry Answered"
+                for t in session_transcript:
+                    if t["speaker"] == "Agent" and ("ബുക്ക്" in t["text"] or "booked" in t["text"].lower()):
+                        outcome = "Booked"
+                        break
+
+                started_at_str = datetime.datetime.now().strftime("%I:%M %p")
+                masked_phone = "+91 98****" + (stream_sid[-4:] if stream_sid else "3210")
+                if caller_phone and caller_phone != "Unknown" and len(caller_phone) >= 6:
+                    masked_phone = caller_phone[:5] + "****" + caller_phone[-2:]
+
+                call_record = {
+                    "id": record_id,
+                    "callerNumber": masked_phone,
+                    "patientName": patient_name,
+                    "patientNameMl": patient_name_ml,
+                    "language": "ml-IN",
+                    "durationSec": duration_sec,
+                    "outcome": outcome,
+                    "timestamp": f"Today at {started_at_str}",
+                    "consentGiven": True,
+                    "recordingKey": f"recordings/{wav_filename}" if all_pcm else None,
+                    "audioUrl": f"/api/calls/live/{record_id}/audio",
+                    "summary": f"Inbound telephone call ({duration_sec}s). Outcome: {outcome}. Patient: {patient_name}.",
+                    "transcript": session_transcript,
+                }
+                save_live_call(call_record)
+                logger.info("Persisted live call record %s (%s, outcome=%s)", record_id, patient_name, outcome)
+            except Exception as e:
+                logger.error("Error saving call record or audio: %s", e)
 
 

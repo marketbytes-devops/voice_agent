@@ -1,13 +1,33 @@
 "use client";
 
-import React from "react";
+import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { PhoneCall, ShieldCheck, ShieldAlert, ArrowUpRight } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardDescription } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
-import { MOCK_CALLS } from "@/lib/mockData";
+import { MOCK_CALLS, CallRecord } from "@/lib/mockData";
 
 export function RecentCallsSection() {
+  const [calls, setCalls] = useState<CallRecord[]>(MOCK_CALLS.slice(0, 4));
+
+  useEffect(() => {
+    async function fetchRecentCalls() {
+      try {
+        const apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://voice-agent-pphb.onrender.com";
+        const res = await fetch(`${apiUrl}/api/calls/live`, { cache: "no-store" });
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data) && data.length > 0) {
+            setCalls(data.slice(0, 4));
+          }
+        }
+      } catch (err) {
+        console.warn("Could not fetch recent live calls:", err);
+      }
+    }
+    fetchRecentCalls();
+  }, []);
+
   return (
     <Card className="flex-1">
       <CardHeader className="flex flex-row items-center justify-between pb-3">
@@ -29,7 +49,7 @@ export function RecentCallsSection() {
       </CardHeader>
 
       <div className="divide-y divide-slate-800/80">
-        {MOCK_CALLS.map((call) => (
+        {calls.map((call) => (
           <div key={call.id} className="py-3.5 flex items-center justify-between gap-4">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-xl bg-slate-800 flex items-center justify-center text-teal-400 font-semibold shrink-0">

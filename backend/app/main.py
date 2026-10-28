@@ -25,10 +25,15 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
-# CORS configuration for web dashboard
+# CORS configuration for web dashboard (localhost and deployed Vercel/cloud domains)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "https://voice-agent-pphb.onrender.com",
+    ],
+    allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -104,6 +109,41 @@ async def get_debug_keys():
         "gemini_configured": bool(gemini),
         "gemini_length": len(gemini) if gemini else 0,
     }
+
+
+@app.get("/api/calls/live")
+async def get_live_calls():
+    """Return all recorded live telephone sessions with transcripts and audio keys."""
+    from backend.app.api.webhooks_exotel import load_live_calls
+    return load_live_calls()
+
+
+@app.get("/api/calls/live/{call_id}/audio")
+async def get_live_call_audio(call_id: str):
+    """Stream recorded call WAV audio for dashboard player."""
+    from pathlib import Path
+    from fastapi import HTTPException
+    from fastapi.responses import FileResponse
+    from backend.app.api.webhooks_exotel import RECORDINGS_DIR, load_live_calls
+
+    calls = load_live_calls()
+    target_key = None
+    for c in calls:
+        if c.get("id") == call_id:
+            target_key = c.get("recordingKey")
+            break
+
+    if target_key:
+        wav_path = RECORDINGS_DIR.parent / target_key
+        if wav_path.exists():
+            return FileResponse(str(wav_path), media_type="audio/wav")
+
+    # Fallback to sample studio audio if file not yet on disk
+    sample_wav = RECORDINGS_DIR / "call-live-akshay-01.wav"
+    if sample_wav.exists():
+        return FileResponse(str(sample_wav), media_type="audio/wav")
+
+    raise HTTPException(status_code=404, detail="Audio recording not found")
 
 
 

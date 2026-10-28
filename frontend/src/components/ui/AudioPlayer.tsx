@@ -80,10 +80,15 @@ export function AudioPlayer({
       setIsPlaying(true);
       playTelephoneChime();
 
-      // For call-901, play the actual Sarvam AI Bulbul v3 studio audio!
-      if (callId === "call-901") {
+      // For recorded live calls or sample audio, stream real audio from backend!
+      if (recordingKey || callId.startsWith("call-live") || callId === "call-901") {
         try {
-          const audio = new Audio("/audio/live_hospital_sample.wav");
+          const apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://voice-agent-pphb.onrender.com";
+          const audioSrc = callId === "call-901" 
+            ? "/audio/live_hospital_sample.wav" 
+            : `${apiUrl}/api/calls/live/${callId}/audio`;
+
+          const audio = new Audio(audioSrc);
           audioElRef.current = audio;
           audio.ontimeupdate = () => {
             if (audio.duration) {
@@ -98,7 +103,7 @@ export function AudioPlayer({
             // Fallback to browser speech synthesis if audio file not reachable
             playTranscriptTurn(0);
           };
-          audio.play();
+          audio.play().catch(() => playTranscriptTurn(0));
           return;
         } catch {
           // Fallback to synthesis
