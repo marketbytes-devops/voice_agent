@@ -401,7 +401,7 @@ async def handle_exotel_voicebot_websocket(websocket: WebSocket) -> None:
                             if speech_start_time and (time.time() - speech_start_time > 4.5):
                                 if silence_timer_task and not silence_timer_task.done():
                                     silence_timer_task.cancel()
-                                await process_caller_speech()
+                                asyncio.create_task(process_caller_speech())
 
                         elif has_spoken:
                             # Caller paused: keep buffering audio while silence timer is running
