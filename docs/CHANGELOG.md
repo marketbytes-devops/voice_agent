@@ -5,6 +5,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [Phase 6] - 2026-10-28
+### Added
+- **Live Exotel Telephony AudioStreams Gateway:** Built full-duplex WebSocket bridge (`/webhooks/exotel/voicebot`) interfacing telecom virtual number (`04954269761`) directly with Sarvam AI and Gemini.
+- **Pipelined Low-Latency Streaming TTS:** Pipelined sentence-by-sentence audio synthesis via Sarvam Bulbul TTS, delivering first-sentence audio playback in ~1.0s while synthesizing subsequent sentences concurrently.
+- **Automatic Call Completion & Disconnect:** Added intelligent farewell detector and `[END_CALL]` signal triggering clean telecom carrier hangup when caller concludes the inquiry with closing phrases ("ശരി", "നന്ദി", "ഓക്കേ", "thank you").
+- **Dynamic Hospital Knowledge Base:** Integrated centralized `hospital_knowledge.json` for Sreerudra Ayurveda Hospital into Gemini prompts with `/api/knowledge` upload endpoints.
+- **Production Connection Pooling:** Reusable `httpx.AsyncClient` connection pools across Sarvam STT, Gemini LLM, and Sarvam TTS eliminating SSL handshake latencies.
+
+### Changed
+- **Sarvam STT Model:** Upgraded from `saaras:v1` to `saaras:v3` for improved Malayalam speech recognition.
+- **Voice Tempo & Cadence:** Configured Sarvam Bulbul pace to `1.10` for brisk, natural conversational delivery.
+- **Silence VAD:** Tuned pause threshold from 800ms down to 380ms for responsive turn turnaround.
+
+---
+
 ## [Phase 5] - 2026-10-26
 ### Added
 - **Exotel Inbound Telephony Webhook:** Implemented `POST /webhooks/exotel/voice` returning LiveKit Inbound SIP forwarding URI (`backend/app/api/webhooks_exotel.py`).
