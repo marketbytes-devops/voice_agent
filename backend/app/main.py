@@ -69,3 +69,26 @@ async def get_debug_logs() -> dict[str, list[str]]:
     from backend.app.core.logging import RECENT_LOGS
     return {"logs": list(RECENT_LOGS)}
 
+
+@app.get("/api/knowledge")
+async def get_knowledge():
+    """Retrieve active hospital knowledge base."""
+    import json
+    from pathlib import Path
+    kb_path = Path(__file__).resolve().parents[2] / "backend" / "agent" / "knowledge" / "hospital_knowledge.json"
+    if kb_path.exists():
+        return json.loads(kb_path.read_text(encoding="utf-8"))
+    return {"error": "Knowledge base not found"}
+
+
+@app.post("/api/knowledge")
+async def update_knowledge(payload: dict):
+    """Update active hospital knowledge base."""
+    import json
+    from pathlib import Path
+    kb_path = Path(__file__).resolve().parents[2] / "backend" / "agent" / "knowledge" / "hospital_knowledge.json"
+    kb_path.parent.mkdir(parents=True, exist_ok=True)
+    kb_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    return {"status": "ok", "message": "Hospital knowledge base updated successfully"}
+
+

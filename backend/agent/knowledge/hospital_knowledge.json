@@ -1,0 +1,58 @@
+{
+  "hospital": {
+    "name": "Sreerudra Ayurveda Hospital & Research Centre",
+    "name_ml": "ശ്രീരുദ്ര ആയുർവേദ ഹോസ്പിറ്റൽ & റിസർച്ച് സെന്റർ",
+    "location": "Alappuzha, Kerala",
+    "address": "Near General Hospital Junction, Alappuzha, Kerala - 688001",
+    "working_hours": "Monday to Saturday: 9:00 AM to 5:00 PM, Sunday: Closed",
+    "emergency_phone": "0477-2251234"
+  },
+  "doctors": [
+    {
+      "id": "doc-manoj-01",
+      "name": "Dr. Manoj",
+      "name_ml": "ഡോക്ടർ മനോജ്",
+      "qualification": "BAMS, MD (Ayurveda)",
+      "department": "Panchakarma & General Ayurveda",
+      "specialties": ["Panchakarma", "Spine & Joint Disorders", "Arthritis", "Rheumatoid Care", "Rejuvenation"],
+      "consultation_days": "Monday to Saturday",
+      "consultation_timings": "9:00 AM to 5:00 PM",
+      "available_slots_tomorrow": ["10:00 AM", "11:30 AM", "2:30 PM", "4:00 PM"]
+    }
+  ],
+  "treatments": [
+    {
+      "name": "Panchakarma Consultation & Therapy",
+      "name_ml": "പഞ്ചകർമ്മ ചികിത്സ",
+      "description": "Traditional Ayurvedic detoxification and cleansing therapies including Abhyangam, Shirodhara, and Kizhi."
+    },
+    {
+      "name": "Spine & Joint Care",
+      "name_ml": "സന്ധിവേദന, നടുവേദന ചികിത്സകൾ",
+      "description": "Specialized Ayurvedic care for disc problems, back pain, knee arthritis, and sciatica."
+    },
+    {
+      "name": "Rejuvenation Therapy (Rasayana)",
+      "name_ml": "രസായന ചികിത്സ (ശരീര പുനരുജ്ജീവനം)",
+      "description": "Immunity boosting and wellness packages under senior Ayurvedic physicians."
+    }
+  ],
+  "faqs": [
+    {
+      "question_ml": "ഡോക്ടർ മനോജ് നാളെ ലഭ്യമാണോ?",
+      "answer_ml": "അതെ, ഡോക്ടർ മനോജ് നാളെ രാവിലെ 9 മുതൽ വൈകുന്നേരം 5 വരെ ലഭ്യമാണ്. നാളെ രാവിലെ 10:00, 11:30, ഉച്ചയ്ക്ക് 2:30, 4:00 മണി എന്നീ സമയങ്ങളിൽ സ്ലോട്ടുകൾ ലഭ്യമാണ്."
+    },
+    {
+      "question_ml": "അപ്പോയിന്റ്മെന്റ് എങ്ങനെ ബുക്ക് ചെയ്യാം?",
+      "answer_ml": "താങ്കളുടെ പേരും സൗകര്യപ്രദമായ സമയവും പറഞ്ഞാൽ ഞങ്ങൾ ഇപ്പോൾ തന്നെ അപ്പോയിന്റ്മെന്റ് രേഖപ്പെടുത്താം."
+    },
+    {
+      "question_ml": "ഹോസ്പിറ്റൽ എവിടെയാണ് സ്ഥിതി ചെയ്യുന്നത്?",
+      "answer_ml": "ആലപ്പുഴ ജനറൽ ഹോസ്പിറ്റൽ ജംഗ്ഷന് സമീപമാണ് ശ്രീരുദ്ര ആയുർവേദ ഹോസ്പിറ്റൽ പ്രവർത്തിക്കുന്നത്."
+    }
+  ],
+  "policies": {
+    "medicines_disclaimer": "ഫോണിലൂടെ മരുന്നുകൾ നിർദ്ദേശിക്കാൻ അനുവാദമില്ല. ഡോക്ടറുടെ നേരിട്ടുള്ള പരിശോധന ആവശ്യമാണ്.",
+    "emergency_policy": "അടിയന്തിര സാഹചര്യങ്ങളിൽ ദയവായി തൊട്ടടുത്തുള്ള ജനറൽ ആശുപത്രിയിലെ എമർജൻസി വിഭാഗത്തിൽ പ്രവേശിക്കുക."
+  }
+}

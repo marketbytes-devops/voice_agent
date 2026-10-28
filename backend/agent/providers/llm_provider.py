@@ -9,6 +9,31 @@ import httpx
 logger = logging.getLogger("clinicvoice")
 
 
+def get_hospital_knowledge() -> str:
+    """Load hospital knowledge base dynamically from JSON."""
+    from pathlib import Path
+    kb_path = Path(__file__).resolve().parents[1] / "knowledge" / "hospital_knowledge.json"
+    if kb_path.exists():
+        try:
+            data = json.loads(kb_path.read_text(encoding="utf-8"))
+            h = data.get("hospital", {})
+            docs = data.get("doctors", [])
+            doc_str = "\n".join([f"- {d['name']} ({d.get('qualification')}), Specialties: {', '.join(d.get('specialties', []))}. Timings: {d.get('consultation_days')} {d.get('consultation_timings')}. Slots tomorrow: {', '.join(d.get('available_slots_tomorrow', []))}" for d in docs])
+            treatments = "\n".join([f"- {t['name_ml']} ({t['name']}): {t['description']}" for t in data.get("treatments", [])])
+            faqs = "\n".join([f"Q: {f['question_ml']} -> A: {f['answer_ml']}" for f in data.get("faqs", [])])
+            return (
+                f"Hospital: {h.get('name')} ({h.get('name_ml')}), {h.get('location')}\n"
+                f"Address: {h.get('address')}\n"
+                f"Hours: {h.get('working_hours')}\n\n"
+                f"Doctors:\n{doc_str}\n\n"
+                f"Treatments:\n{treatments}\n\n"
+                f"Frequently Asked Questions (FAQs):\n{faqs}"
+            )
+        except Exception as e:
+            logger.warning("Failed parsing hospital_knowledge.json: %s", e)
+    return ""
+
+
 class LLMAdapter:
     """Language Model adapter supporting tool-calling with mock mode fallback."""
     name = "llm_adapter"
@@ -30,13 +55,10 @@ class LLMAdapter:
             system_prompt = next((m["content"] for m in messages if m["role"] == "system"), "")
             user_msg = messages[-1]["content"] if messages else ""
 
+            kb_context = get_hospital_knowledge()
             hospital_context = (
                 "You are the warm, polite Malayalam voice receptionist at Sreerudra Ayurveda Hospital & Research Centre, Alappuzha.\n"
-                "Hospital Information:\n"
-                "- Lead Doctor: Dr. Manoj (BAMS, MD Ayurveda, Specialist in Panchakarma & General Ayurveda).\n"
-                "- Working Hours: Monday to Saturday, 9:00 AM to 5:00 PM.\n"
-                "- Available appointment slots tomorrow: 10:00 AM, 11:30 AM, 2:30 PM, and 4:00 PM.\n"
-                "- Treatments offered: Panchakarma, Arthritis & Spine care, Rejuvenation therapy, General consultations.\n"
+                f"Hospital Knowledge Base:\n{kb_context}\n\n"
                 "Guardrails:\n"
                 "1. Reply in 1-2 short, spoken sentences in natural Malayalam suited for telephone conversation.\n"
                 "2. If the caller asks if Dr. Manoj is available tomorrow or wants an appointment, confirm he is available and ask which time slot (10:00 AM, 11:30 AM, 2:30 PM, or 4:00 PM) suits them best.\n"

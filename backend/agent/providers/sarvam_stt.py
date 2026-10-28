@@ -19,6 +19,7 @@ class SarvamSTTAdapter:
 
     async def transcribe(self, audio_data: bytes, language: str = "ml-IN") -> str:
         if not self.api_key:
+            logger.error("CRITICAL: SARVAM_API_KEY is missing in environment variables! Live STT disabled.")
             # Fallback mock for testing
             return "നമസ്കാരം, എനിക്ക് നാളെ ഡോക്ടർ മനോജിന് ഒരു അപ്പോയിന്റ്മെന്റ് വേണം"
 

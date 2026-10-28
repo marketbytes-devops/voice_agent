@@ -25,6 +25,7 @@ class SarvamTTSAdapter:
         speaker = voice or self.voice_for(language)
 
         if not self.api_key:
+            logger.error("CRITICAL: SARVAM_API_KEY is missing in environment variables! Live TTS disabled, generating silent fallback.")
             # Fallback mock audio generation (0.5s valid WAV)
             sample_rate = 8000
             num_samples = 4000
