@@ -48,16 +48,54 @@
 
 ## 2. Core Subsystems
 
-### 2.1 Backend API (`backend/app/`)
-* **Framework:** FastAPI with asynchronous ASGI handlers and Python 3.12 strict typing.
-* **Security & RLS:** PostgreSQL Row-Level Security ensures that tenant queries are scoped to `app.clinic_id`.
-* **Rate Limiting:** Sliding-window limiter on sensitive endpoints (`/auth/login`) protecting against brute force.
-* **Audit Logging:** Immutable audit entries recorded in `audit_log` whenever patient data or audio recordings are accessed.
-* **Log Sanitization:** Regex-based filter (`SensitiveDataFilter`) redacts all Indian phone numbers (`+91 98****3210`) in technical logs.
+## 2.3 Live Telephony & Speech Gateway (`backend/app/api/webhooks_exotel.py`)
+* **Transport:** Full-duplex WebSocket AudioStreams bridge (`/webhooks/exotel/voicebot`) directly interfacing Indian carrier network virtual numbers (`0495...`).
+* **Audio Format:** 8kHz 16-bit linear PCM mono streaming.
+* **VAD & Silence Detection:** Adaptive 380ms silence pause detector triggering immediate end-of-turn processing.
+* **Pipelined Low-Latency TTS:** Sentence-by-sentence streaming synthesis via Sarvam Bulbul TTS (`bulbul:v3`), streaming sentence 1 in ~1.0s while concurrently synthesizing subsequent sentences in the background.
+* **Intelligent Call Termination:** Farewell intent detector listening for closing phrases ("ശരി", "നന്ദി", "ഓക്കേ", "thank you", "bye") or post-booking completions to play goodbye audio and cleanly drop the carrier call without dead air.
 
-### 2.2 Storage & Retention Automation (`backend/app/services/`)
-* **Storage Service (`storage_service.py`):** Path traversal validated (`^[a-zA-Z0-9_\-\./]+$`), generates 15-minute expiring signed URLs.
-* **Retention Sweeper (`retention_sweeper.py`):** Nightly automated cleanup purging raw audio older than `RECORDING_RETENTION_DAYS` (30 days) while preserving call metadata, summaries, and transcripts.
+---
+
+## 3. Active AI Models & Provider Inventory
+
+| Layer | Model / Service | Provider | Purpose & Parameters |
+| :--- | :--- | :--- | :--- |
+| **Telephony Gateway** | Exotel AudioStreams | Exotel | Full-duplex WebSocket streaming 8kHz PCM over carrier line |
+| **Speech-to-Text (STT)** | `saaras:v3` | Sarvam AI | Regional Malayalam speech recognition (`ml-IN`) |
+| **Reasoning Engine (LLM)**| `gemini-3.5-flash-lite` | Google AI | Hospital slot booking, clinical guardrails, triage, `maxOutputTokens: 55`, `temp: 0.2` |
+| **Text-to-Speech (TTS)** | `bulbul:v3` | Sarvam AI | Native Malayalam female voice (`kavya`), `speech_sample_rate: 8000`, `pace: 1.10` |
+| **Knowledge Engine** | `hospital_knowledge.json` | Dynamic Context | Centralized JSON store for doctors, slots, fees, FAQs |
+| **Call Recording & Storage**| RIFF 8kHz WAV + JSON | Local / S3 | Mixed stereo audio recording and turn-by-turn bilingual transcripts |
+
+---
+
+## 4. Production Scale Roadmap (<800ms Latency & High Accuracy)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Caller as Patient Phone
+    participant Exotel as Telecom (Exotel SIP)
+    participant Edge as Edge Gateway (LiveKit / WebSockets)
+    participant VAD as Silero Neural VAD
+    participant STT as Streaming STT (Deepgram/Sarvam WS)
+    participant LLM as Streaming LLM (Gemini / Groq LLaMA)
+    participant TTS as Streaming TTS (Cartesia / Sarvam WS)
+    participant DB as PostgreSQL + S3
+
+    Caller->>Exotel: Dial Virtual Number
+    Exotel->>Edge: Full-Duplex WebRTC / SIP Stream
+    Edge->>Caller: Welcome Greeting Audio (Instant)
+    Caller->>Edge: Speaks Malayalam query
+    Edge->>VAD: Continuous Audio Frames
+    VAD->>STT: Human Speech Window (200ms)
+    STT->>LLM: Streamed Text Tokens
+    LLM->>TTS: First Sentence Tokens (150ms)
+    TTS->>Edge: First Audio Chunk (180ms)
+    Edge->>Caller: Audio begins playing (<800ms total)
+    Edge->>DB: Persist Call Record & Audio
+```
 
 ### 2.3 Voice Agent Core (`backend/agent/`)
 * **LiveKit SIP Integration:** Receives inbound telephone streams.
