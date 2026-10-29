@@ -131,14 +131,19 @@ def _load_pcm_greeting() -> bytes:
         Path("frontend/public/audio/hospital_welcome_ml.wav"),
         base_dir / "frontend" / "public" / "audio" / "live_hospital_sample.wav",
         Path("frontend/public/audio/live_hospital_sample.wav"),
+        Path("/opt/render/project/src/frontend/public/audio/hospital_welcome_ml.wav"),
+        Path("/opt/render/project/src/frontend/public/audio/live_hospital_sample.wav"),
     ]
     for p in audio_paths:
         if p.exists():
             try:
                 with wave.open(str(p), "rb") as w:
-                    return w.readframes(w.getnframes())
+                    frames = w.readframes(w.getnframes())
+                    logger.info("Successfully loaded pre-rendered greeting from %s (%d bytes)", p, len(frames))
+                    return frames
             except Exception as e:
                 logger.warning("Failed reading audio file %s: %s", p, e)
+    logger.warning("No pre-rendered greeting WAV found at expected paths!")
     return b""
 
 
@@ -480,7 +485,16 @@ async def handle_exotel_voicebot_websocket(websocket: WebSocket) -> None:
                 logger.info("Exotel Voicebot session started: StreamSid=%s CallSid=%s Caller=%s", stream_sid, call_sid, caller_phone)
 
                 # Stream initial hospital greeting without interruption
-                if pcm_greeting:
+                if not pcm_greeting:
+                    logger.warning("Exotel Voicebot: Pre-rendered greeting WAV not found, generating fallback via Sarvam TTS...")
+                    welcome_text = "നമസ്കാരം, ശ്രീരുദ്ര ആയുർവേദ ആശുപത്രിയിലേക്ക് സ്വാഗതം. ഞാൻ ഒരു AI അസിസ്റ്റന്റാണ്. ഈ കോൾ ഗുണനിലവാരത്തിനായി റെക്കോർഡ് ചെയ്യപ്പെടുന്നുണ്ട്. ഇന്ന് ഞാൻ നിങ്ങളെ എങ്ങനെയാണ് സഹായിക്കേണ്ടത്?"
+                    try:
+                        tts_audio = await providers.tts.synthesize(welcome_text, language="ml-IN")
+                        pcm_greeting = _to_raw_pcm(tts_audio)
+                    except Exception as e:
+                        logger.error("Exotel Voicebot: Failed generating fallback greeting: %s", e)
+
+                if pcm_greeting and stream_sid:
                     session_audio_chunks.append(pcm_greeting)
                     session_transcript.append({
                         "speaker": "Agent",

@@ -98,16 +98,19 @@ async def update_knowledge(payload: dict):
 
 @app.get("/debug/keys")
 async def get_debug_keys():
-    """Verify whether API keys are loaded in production."""
+    """Verify whether API keys and greeting audio are loaded in production."""
     import os
     from backend.app.core.config import settings
+    from backend.app.api.webhooks_exotel import _load_pcm_greeting
     sarvam = os.getenv("SARVAM_API_KEY") or settings.SARVAM_API_KEY
     gemini = os.getenv("GEMINI_API_KEY") or settings.GEMINI_API_KEY
+    greeting_bytes = len(_load_pcm_greeting())
     return {
         "sarvam_configured": bool(sarvam),
         "sarvam_length": len(sarvam) if sarvam else 0,
         "gemini_configured": bool(gemini),
         "gemini_length": len(gemini) if gemini else 0,
+        "greeting_pcm_bytes": greeting_bytes,
     }
 
 
