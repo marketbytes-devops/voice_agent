@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **In-Process Database Tool Execution:** Upgraded `AgentToolExecutor` (`backend/agent/tools.py`) to execute `get_free_slots` and `book_appointment` directly against Supabase in sub-15ms without HTTP loopback latency.
 - **Dynamic Telephony Persistence:** Updated `backend/app/api/webhooks_exotel.py` to persist completed call records, turn-by-turn transcripts, and confirmed bookings with row-level locks directly into Supabase `calls` and `appointments` tables.
 - **Dashboard Data Endpoints:** Added `/api/appointments` and `/api/doctors` to `backend/app/main.py` enabling the staff dashboard to retrieve live calendar data.
+- **Live Next.js Dashboard Calendar:** Connected appointments timetable (`frontend/src/app/appointments`) and today's schedule (`frontend/src/components/pages/home`) to dynamic backend endpoints with live Supabase status indicator and doctor filter.
 
 ---
 

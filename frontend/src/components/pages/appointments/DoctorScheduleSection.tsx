@@ -4,9 +4,15 @@ import React from "react";
 import { UserCheck, Clock, Award, ShieldCheck } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardDescription } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
-import { MOCK_DOCTORS } from "@/lib/mockData";
+import { MOCK_DOCTORS, DoctorItem } from "@/lib/mockData";
 
-export function DoctorScheduleSection() {
+interface DoctorScheduleSectionProps {
+  doctors?: DoctorItem[];
+}
+
+export function DoctorScheduleSection({ doctors = MOCK_DOCTORS }: DoctorScheduleSectionProps) {
+  const displayDoctors = doctors && doctors.length > 0 ? doctors : MOCK_DOCTORS;
+
   return (
     <Card>
       <CardHeader className="pb-3">
@@ -20,7 +26,7 @@ export function DoctorScheduleSection() {
       </CardHeader>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {MOCK_DOCTORS.map((doc) => (
+        {displayDoctors.map((doc) => (
           <div key={doc.id} className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-3">
             <div className="flex items-start justify-between">
               <div>

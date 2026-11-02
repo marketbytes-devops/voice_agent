@@ -13,4 +13,5 @@ build/
 !frontend/public/audio/*.wav
 cloudflared.exe
 .pytest_cache/
+*.tsbuildinfo
 

@@ -4,14 +4,25 @@ import React, { useState } from "react";
 import { Calendar as CalendarIcon, Clock, User, Filter } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardDescription } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
-import { MOCK_APPOINTMENTS, MOCK_DOCTORS, AppointmentRecord } from "@/lib/mockData";
+import { MOCK_APPOINTMENTS, MOCK_DOCTORS, AppointmentRecord, DoctorItem } from "@/lib/mockData";
 
-export function CalendarGridSection() {
+interface CalendarGridSectionProps {
+  appointments?: AppointmentRecord[];
+  doctors?: DoctorItem[];
+}
+
+export function CalendarGridSection({
+  appointments = MOCK_APPOINTMENTS,
+  doctors = MOCK_DOCTORS,
+}: CalendarGridSectionProps) {
   const [selectedDoctor, setSelectedDoctor] = useState<string>("all");
 
+  const displayAppointments = appointments && appointments.length > 0 ? appointments : MOCK_APPOINTMENTS;
+  const displayDoctors = doctors && doctors.length > 0 ? doctors : MOCK_DOCTORS;
+
   const filtered = selectedDoctor === "all"
-    ? MOCK_APPOINTMENTS
-    : MOCK_APPOINTMENTS.filter((a) => a.doctorName.toLowerCase().includes(selectedDoctor.toLowerCase()));
+    ? displayAppointments
+    : displayAppointments.filter((a) => a.doctorName.toLowerCase().includes(selectedDoctor.toLowerCase()));
 
   return (
     <Card>
@@ -35,8 +46,9 @@ export function CalendarGridSection() {
             className="bg-slate-900 border border-slate-800 text-xs text-white rounded-xl px-3 py-2 outline-none focus:border-emerald-500"
           >
             <option value="all">All Doctors</option>
-            <option value="manoj">Dr. Manoj Kumar</option>
-            <option value="sreedevi">Dr. Sreedevi K</option>
+            {displayDoctors.map((doc) => (
+              <option key={doc.id} value={doc.name.toLowerCase()}>{doc.name}</option>
+            ))}
           </select>
         </div>
       </CardHeader>
