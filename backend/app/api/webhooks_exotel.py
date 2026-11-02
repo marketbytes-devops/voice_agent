@@ -12,7 +12,7 @@ import uuid
 import wave
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, Response, WebSocket, WebSocketDisconnect, status
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.agent.providers.factory import build_providers
@@ -235,6 +235,7 @@ async def persist_call_to_supabase(
         from backend.app.core.database import get_session_factory
         factory = get_session_factory()
         async with factory() as session:
+            await session.execute(text(f"SET LOCAL app.clinic_id = '{str(clinic_id)}'"))
             caller_phone = record.get("callerNumber", "Unknown")
             patient_name = record.get("patientName", "Patient")
             patient_id = None
@@ -674,6 +675,10 @@ async def handle_exotel_voicebot_websocket(websocket: WebSocket) -> None:
                     elif "ലക്ഷ്മി" in txt or "lakshmi" in txt:
                         patient_name = "Lakshmi"
                         patient_name_ml = "ലക്ഷ്മി"
+                        break
+                    elif "രശ്മി" in txt or "rashmi" in txt:
+                        patient_name = "Rashmi"
+                        patient_name_ml = "രശ്മി"
                         break
 
                 outcome = "Inquiry Answered"
