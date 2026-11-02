@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import urllib.parse
 import uuid
 from collections.abc import AsyncGenerator
@@ -26,7 +27,7 @@ _session_factory: async_sessionmaker[AsyncSession] | None = None
 
 
 def get_engine() -> AsyncEngine:
-    """Lazy initialize async database engine with robust URI normalization."""
+    """Lazy initialize async database engine with robust URI normalization and IPv4 pooler fallback."""
     global _engine
     if _engine is None:
         raw_url = str(settings.DATABASE_URL).strip()
@@ -45,6 +46,17 @@ def get_engine() -> AsyncEngine:
                     user, _, pwd = user_pass.partition(":")
                     clean_pwd = urllib.parse.quote(urllib.parse.unquote(pwd), safe="")
                     raw_url = f"{proto}://{user}:{clean_pwd}@{host_db}"
+        except Exception:
+            pass
+
+        # Resolve Supabase IPv6 direct domain to IPv4 Pooler for cloud environments (like Render Free tier without IPv6 egress)
+        try:
+            m = re.search(r"db\.([a-zA-Z0-9_-]+)\.supabase\.co", raw_url)
+            if m:
+                project_ref = m.group(1)
+                raw_url = raw_url.replace(f"db.{project_ref}.supabase.co", "aws-0-ap-south-1.pooler.supabase.com")
+                if "://postgres:" in raw_url:
+                    raw_url = raw_url.replace("://postgres:", f"://postgres.{project_ref}:", 1)
         except Exception:
             pass
 
@@ -81,7 +93,6 @@ async def get_db(clinic_id: uuid.UUID | str | None = None) -> AsyncGenerator[Asy
     factory = get_session_factory()
     async with factory() as session:
         if clinic_id:
-            # Set PostgreSQL session-local variable for RLS
             str_clinic_id = str(clinic_id)
             await session.execute(text(f"SET LOCAL app.clinic_id = '{str_clinic_id}'"))
         try:
