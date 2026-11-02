@@ -149,4 +149,66 @@ async def get_live_call_audio(call_id: str):
     raise HTTPException(status_code=404, detail="Audio recording not found")
 
 
+@app.get("/api/appointments")
+async def get_dashboard_appointments():
+    """Retrieve all confirmed appointments from database for staff dashboard."""
+    try:
+        from sqlalchemy import select
+        from backend.app.core.database import get_session_factory
+        from backend.app.models import Appointment, Doctor, Patient
+        factory = get_session_factory()
+        async with factory() as session:
+            stmt = (
+                select(Appointment, Doctor, Patient)
+                .join(Doctor, Appointment.doctor_id == Doctor.id)
+                .join(Patient, Appointment.patient_id == Patient.id)
+                .order_by(Appointment.starts_at.desc())
+            )
+            results = (await session.execute(stmt)).all()
+            appts = []
+            for appt, doc, pat in results:
+                appts.append({
+                    "id": str(appt.id),
+                    "patientName": pat.name,
+                    "patientPhone": pat.phone,
+                    "doctorName": doc.name,
+                    "treatmentName": appt.reason or "Ayurveda Consultation",
+                    "timeStr": appt.starts_at.strftime("%I:%M %p"),
+                    "dateStr": appt.starts_at.strftime("%Y-%m-%d"),
+                    "status": appt.status,
+                    "visitType": appt.visit_type or "in_person",
+                })
+            return appts
+    except Exception as e:
+        logger.warning("Could not fetch appointments from DB: %s", e)
+        return []
+
+
+@app.get("/api/doctors")
+async def get_dashboard_doctors():
+    """Retrieve active doctors and their working hours for dashboard."""
+    try:
+        from sqlalchemy import select
+        from backend.app.core.database import get_session_factory
+        from backend.app.models import Doctor
+        factory = get_session_factory()
+        async with factory() as session:
+            stmt = select(Doctor).where(Doctor.active == True)
+            doctors = (await session.execute(stmt)).scalars().all()
+            data = []
+            for d in doctors:
+                data.append({
+                    "id": str(d.id),
+                    "name": d.name,
+                    "qualification": d.qualification or "BAMS, MD",
+                    "specialties": d.specialties or [],
+                    "workingHours": "09:00 AM - 05:00 PM",
+                    "active": d.active,
+                })
+            return data
+    except Exception as e:
+        logger.warning("Could not fetch doctors from DB: %s", e)
+        return []
+
+
 

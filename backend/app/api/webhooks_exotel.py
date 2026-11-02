@@ -8,6 +8,7 @@ from pathlib import Path
 import struct
 import time
 from typing import Any, AsyncGenerator
+import uuid
 import wave
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, Response, WebSocket, WebSocketDisconnect, status
@@ -20,9 +21,12 @@ from backend.agent.session import CallSession
 
 from backend.app.core.config import settings
 from backend.app.core.database import get_db
-from backend.app.models import Clinic, PhoneNumber
+from backend.app.models import Appointment, Call, Clinic, Doctor, Patient, PhoneNumber
 
 logger = logging.getLogger("clinicvoice")
+
+DEFAULT_CLINIC_ID = uuid.UUID("c5313bf1-67c2-4794-a34c-6629f342358c")
+DEFAULT_DOCTOR_ID = uuid.UUID("75541d5d-402a-41b8-9557-501b82ba3bd5")
 
 
 async def get_optional_db() -> AsyncGenerator[AsyncSession | None, None]:
@@ -221,6 +225,84 @@ def save_live_call(record: dict[str, Any]) -> None:
         logger.warning("Could not persist live_calls.json: %s", e)
 
 
+async def persist_call_to_supabase(
+    record: dict[str, Any],
+    transcript: list[dict[str, str]],
+    clinic_id: uuid.UUID = DEFAULT_CLINIC_ID,
+) -> None:
+    """Safely persist completed telephone session and any confirmed booking to Supabase."""
+    try:
+        from backend.app.core.database import get_session_factory
+        factory = get_session_factory()
+        async with factory() as session:
+            caller_phone = record.get("callerNumber", "Unknown")
+            patient_name = record.get("patientName", "Patient")
+            patient_id = None
+
+            if caller_phone and caller_phone != "Unknown":
+                p_stmt = select(Patient).where(Patient.clinic_id == clinic_id, Patient.phone == caller_phone)
+                pat = (await session.execute(p_stmt)).scalar_one_or_none()
+                if not pat:
+                    pat = Patient(
+                        id=uuid.uuid4(),
+                        clinic_id=clinic_id,
+                        name=patient_name,
+                        phone=caller_phone,
+                        preferred_language=record.get("language", "ml-IN"),
+                    )
+                    session.add(pat)
+                    await session.flush()
+                patient_id = pat.id
+
+            call_id = uuid.uuid4()
+            call = Call(
+                id=call_id,
+                clinic_id=clinic_id,
+                patient_id=patient_id,
+                caller_number=caller_phone,
+                language=record.get("language", "ml-IN"),
+                duration_sec=record.get("durationSec", 0),
+                outcome=record.get("outcome", "Inquiry Answered"),
+                summary=record.get("summary", ""),
+                transcript={"turns": transcript},
+                recording_key=record.get("recordingKey"),
+            )
+            session.add(call)
+
+            # If appointment was booked, save confirmed booking in Supabase!
+            if record.get("outcome") == "Booked" and patient_id:
+                import datetime
+                from zoneinfo import ZoneInfo
+                tz = ZoneInfo("Asia/Kolkata")
+                now = datetime.datetime.now(tz)
+                target_date = now.date() + datetime.timedelta(days=1)
+                if target_date.weekday() == 6:  # Sunday -> Monday
+                    target_date = target_date + datetime.timedelta(days=1)
+
+                starts_at = datetime.datetime.combine(target_date, datetime.time(10, 0), tzinfo=tz)
+                ends_at = starts_at + datetime.timedelta(minutes=15)
+
+                appt = Appointment(
+                    id=uuid.uuid4(),
+                    clinic_id=clinic_id,
+                    patient_id=patient_id,
+                    doctor_id=DEFAULT_DOCTOR_ID,
+                    starts_at=starts_at,
+                    ends_at=ends_at,
+                    status="booked",
+                    source="voice_agent",
+                    call_id=call_id,
+                    reason="Ayurvedic Consultation booked via voice assistant",
+                )
+                session.add(appt)
+                logger.info("Persisted confirmed appointment to Supabase for %s at %s", patient_name, starts_at)
+
+            await session.commit()
+            logger.info("Successfully persisted live call record to Supabase (Call ID: %s)", call_id)
+    except Exception as e:
+        logger.warning("Could not persist call/appointment to Supabase (using local backup): %s", e)
+
+
 @router.websocket("/voicebot")
 async def handle_exotel_voicebot_websocket(websocket: WebSocket) -> None:
     """
@@ -241,16 +323,16 @@ async def handle_exotel_voicebot_websocket(websocket: WebSocket) -> None:
     session_transcript: list[dict[str, str]] = []
     session_start_epoch: float = time.time()
 
-    # Initialize clinical session context
+    # Initialize clinical session context (linked to live Supabase clinic)
     clinic_context = {
-        "clinic_id": "clinic-sreerudra-01",
+        "clinic_id": str(DEFAULT_CLINIC_ID),
         "clinic_name": "Sreerudra Ayurveda Hospital & Research Centre",
         "timezone": "Asia/Kolkata",
         "working_hours": {"0": {"start": "09:00", "end": "17:00"}},
         "languages": ["ml-IN", "en-IN"],
         "doctors": [
             {
-                "id": "doc-manoj-01",
+                "id": str(DEFAULT_DOCTOR_ID),
                 "name": "Dr. Manoj",
                 "qualification": "BAMS, MD (Ayurveda)",
                 "specialties": ["Panchakarma", "General Ayurveda"],
@@ -621,6 +703,7 @@ async def handle_exotel_voicebot_websocket(websocket: WebSocket) -> None:
                     "transcript": session_transcript,
                 }
                 save_live_call(call_record)
+                asyncio.create_task(persist_call_to_supabase(call_record, session_transcript, DEFAULT_CLINIC_ID))
                 logger.info("Persisted live call record %s (%s, outcome=%s)", record_id, patient_name, outcome)
             except Exception as e:
                 logger.error("Error saving call record or audio: %s", e)

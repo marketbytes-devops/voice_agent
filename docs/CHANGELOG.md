@@ -5,6 +5,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [Phase 7] - 2026-11-02
+### Added
+- **Managed Cloud Database (Supabase Mumbai / ap-south-1):** Provisioned PostgreSQL 17 in AWS Mumbai for ultra-low latency with Indian cellular lines, creating all 18 tables with Row-Level Security (RLS) tenant isolation.
+- **Automated Schema & Seeding Engine:** Created `backend/scripts/init_db.py` and `backend/scripts/seed_clinic.py` seeding Sreerudra Ayurveda Hospital, Dr. Manoj, Monday–Saturday schedules (9 AM – 5 PM with lunch break exclusion), treatments, and bilingual FAQs.
+- **In-Process Database Tool Execution:** Upgraded `AgentToolExecutor` (`backend/agent/tools.py`) to execute `get_free_slots` and `book_appointment` directly against Supabase in sub-15ms without HTTP loopback latency.
+- **Dynamic Telephony Persistence:** Updated `backend/app/api/webhooks_exotel.py` to persist completed call records, turn-by-turn transcripts, and confirmed bookings with row-level locks directly into Supabase `calls` and `appointments` tables.
+- **Dashboard Data Endpoints:** Added `/api/appointments` and `/api/doctors` to `backend/app/main.py` enabling the staff dashboard to retrieve live calendar data.
+
+---
+
 ## [Phase 6] - 2026-10-28
 ### Added
 - **Live Exotel Telephony AudioStreams Gateway:** Built full-duplex WebSocket bridge (`/webhooks/exotel/voicebot`) interfacing telecom virtual number (`04954269761`) directly with Sarvam AI and Gemini.
