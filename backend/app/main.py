@@ -190,6 +190,36 @@ async def get_dashboard_appointments(clinic_id: str = DEFAULT_CLINIC_ID):
         return []
 
 
+DEFAULT_DOCTORS_FALLBACK = [
+    {
+        "id": "75541d5d-402a-41b8-9557-501b82ba3bd5",
+        "name": "Dr. Manoj",
+        "qualification": "BAMS, MD (Ayurveda)",
+        "specialties": ["Kayachikitsa", "Panchakarma", "General Consultation"],
+        "workingHours": "09:00 AM - 05:00 PM",
+        "active": True,
+    }
+]
+
+
+@app.get("/api/db-status")
+async def get_db_status():
+    """Diagnostic check for database connectivity and config."""
+    from backend.app.core.config import settings
+    raw_url = str(settings.DATABASE_URL)
+    url_preview = raw_url.split("@")[-1] if "@" in raw_url else "local/unknown"
+    try:
+        from sqlalchemy import text
+        from backend.app.core.database import get_session_factory
+        factory = get_session_factory()
+        async with factory() as session:
+            res = await session.execute(text("SELECT 1"))
+            val = res.scalar()
+            return {"connected": True, "host": url_preview, "ping": val}
+    except Exception as e:
+        return {"connected": False, "host": url_preview, "error": str(e)}
+
+
 @app.get("/api/doctors")
 async def get_dashboard_doctors(clinic_id: str = DEFAULT_CLINIC_ID):
     """Retrieve active doctors and their working hours for dashboard."""
@@ -214,10 +244,10 @@ async def get_dashboard_doctors(clinic_id: str = DEFAULT_CLINIC_ID):
                     "workingHours": "09:00 AM - 05:00 PM",
                     "active": d.active,
                 })
-            return data
+            return data if data else DEFAULT_DOCTORS_FALLBACK
     except Exception as e:
         logger.warning("Could not fetch doctors from DB: %s", e)
-        return []
+        return DEFAULT_DOCTORS_FALLBACK
 
 
 

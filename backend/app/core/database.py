@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import urllib.parse
 import uuid
 from collections.abc import AsyncGenerator
 from typing import Any
@@ -25,11 +26,30 @@ _session_factory: async_sessionmaker[AsyncSession] | None = None
 
 
 def get_engine() -> AsyncEngine:
-    """Lazy initialize async database engine."""
+    """Lazy initialize async database engine with robust URI normalization."""
     global _engine
     if _engine is None:
+        raw_url = str(settings.DATABASE_URL).strip()
+        # Ensure async driver for SQLAlchemy 2.0 + asyncpg
+        if raw_url.startswith("postgresql://"):
+            raw_url = "postgresql+asyncpg://" + raw_url[len("postgresql://"):]
+        elif raw_url.startswith("postgres://"):
+            raw_url = "postgresql+asyncpg://" + raw_url[len("postgres://"):]
+
+        # Handle unescaped '@' in password if present
+        try:
+            proto, sep, rest = raw_url.partition("://")
+            if "@" in rest:
+                user_pass, _, host_db = rest.rpartition("@")
+                if ":" in user_pass:
+                    user, _, pwd = user_pass.partition(":")
+                    clean_pwd = urllib.parse.quote(urllib.parse.unquote(pwd), safe="")
+                    raw_url = f"{proto}://{user}:{clean_pwd}@{host_db}"
+        except Exception:
+            pass
+
         _engine = create_async_engine(
-            settings.DATABASE_URL,
+            raw_url,
             echo=False,
             pool_pre_ping=True,
             pool_size=10,
