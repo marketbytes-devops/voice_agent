@@ -149,15 +149,21 @@ async def get_live_call_audio(call_id: str):
     raise HTTPException(status_code=404, detail="Audio recording not found")
 
 
+DEFAULT_CLINIC_ID = "c5313bf1-67c2-4794-a34c-6629f342358c"
+
+
 @app.get("/api/appointments")
-async def get_dashboard_appointments():
+async def get_dashboard_appointments(clinic_id: str = DEFAULT_CLINIC_ID):
     """Retrieve all confirmed appointments from database for staff dashboard."""
     try:
-        from sqlalchemy import select
+        import uuid as _uuid
+        from sqlalchemy import select, text
         from backend.app.core.database import get_session_factory
         from backend.app.models import Appointment, Doctor, Patient
+        clean_clinic_id = str(_uuid.UUID(clinic_id))
         factory = get_session_factory()
         async with factory() as session:
+            await session.execute(text(f"SET LOCAL app.clinic_id = '{clean_clinic_id}'"))
             stmt = (
                 select(Appointment, Doctor, Patient)
                 .join(Doctor, Appointment.doctor_id == Doctor.id)
@@ -185,14 +191,17 @@ async def get_dashboard_appointments():
 
 
 @app.get("/api/doctors")
-async def get_dashboard_doctors():
+async def get_dashboard_doctors(clinic_id: str = DEFAULT_CLINIC_ID):
     """Retrieve active doctors and their working hours for dashboard."""
     try:
-        from sqlalchemy import select
+        import uuid as _uuid
+        from sqlalchemy import select, text
         from backend.app.core.database import get_session_factory
         from backend.app.models import Doctor
+        clean_clinic_id = str(_uuid.UUID(clinic_id))
         factory = get_session_factory()
         async with factory() as session:
+            await session.execute(text(f"SET LOCAL app.clinic_id = '{clean_clinic_id}'"))
             stmt = select(Doctor).where(Doctor.active == True)
             doctors = (await session.execute(stmt)).scalars().all()
             data = []
