@@ -183,8 +183,6 @@ def load_live_calls() -> list[dict[str, Any]]:
         except Exception:
             pass
     return []
-        }
-    ]
 
 
 def save_live_call(record: dict[str, Any]) -> None:
