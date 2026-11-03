@@ -82,7 +82,7 @@ async def seed_sreerudra_clinic() -> None:
             logger.info("Clinic already exists: %s", clinic.name)
 
         # 3. Create Virtual Phone Number Route
-        virtual_number = "+9104954269761"  # Exotel virtual inbound number
+        virtual_number = "+914954269761"  # Exotel virtual inbound number (E.164 without leading 0)
         phone_stmt = select(PhoneNumber).where(PhoneNumber.e164 == virtual_number)
         phone_res = await session.execute(phone_stmt)
         phone_record = phone_res.scalar_one_or_none()

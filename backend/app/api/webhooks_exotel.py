@@ -73,7 +73,7 @@ async def handle_exotel_incoming_voice(
     if db is not None:
         try:
             phone_res = await db.execute(
-                select(PhoneNumber).where(PhoneNumber.e164 == To, PhoneNumber.status == "active")
+                select(PhoneNumber).where(((PhoneNumber.e164 == To) | (PhoneNumber.e164 == (To.replace(" ", "").replace("-", "") if To else ""))), PhoneNumber.status == "active")
             )
             phone_record = phone_res.scalar_one_or_none()
             if phone_record and phone_record.clinic_id:
