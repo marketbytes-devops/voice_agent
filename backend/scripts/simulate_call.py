@@ -11,10 +11,15 @@ from __future__ import annotations
 import asyncio
 import datetime
 import logging
+import sys
+from pathlib import Path
 import uuid
 from zoneinfo import ZoneInfo
-from sqlalchemy import select, text
 
+# Ensure workspace root is in sys.path
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from sqlalchemy import select, text
 from backend.app.core.database import get_session_factory
 from backend.app.models import Appointment, Call, Doctor, FAQEntry, Patient
 
@@ -99,11 +104,34 @@ async def simulate_call(caller_name: str = "Ananthakrishnan Nair (അനന്�
         )
         session.add(call)
 
-        # 5. Create Confirmed Appointment
+        # 5. Create Confirmed Appointment (Find next available slot avoiding double booking)
         tomorrow = now.date() + datetime.timedelta(days=1)
         if tomorrow.weekday() == 6:  # Skip Sunday
             tomorrow += datetime.timedelta(days=1)
-        starts_at = datetime.datetime.combine(tomorrow, datetime.time(10, 0), tzinfo=tz)
+
+        existing_appts = (await session.execute(
+            select(Appointment.starts_at).where(
+                Appointment.doctor_id == doc_id,
+                Appointment.status != "cancelled"
+            )
+        )).scalars().all()
+        existing_times = {a.astimezone(tz) for a in existing_appts}
+
+        slot_hour = 10
+        slot_min = 0
+        while True:
+            candidate = datetime.datetime.combine(tomorrow, datetime.time(slot_hour, slot_min), tzinfo=tz)
+            if candidate not in existing_times:
+                starts_at = candidate
+                break
+            slot_min += 15
+            if slot_min >= 60:
+                slot_min = 0
+                slot_hour += 1
+            if slot_hour >= 17:
+                break
+
+        slot_str = starts_at.strftime("%I:%M %p")
 
         appt = Appointment(
             id=uuid.uuid4(),
@@ -136,7 +164,7 @@ if __name__ == "__main__":
     print("\n" + "="*50)
     print("SIMULATED CALL COMPLETED SUCCESSFULLY!")
     print(f"Doctor: {result['doctor']}")
-    print(f"Patient: {result['patient']}")
+    print(f"Patient: {result['patient'].encode('ascii', 'backslashreplace').decode('ascii')}")
     print(f"Slot Booked: {result['time']}")
     print("Refresh http://localhost:3000 to see the live updates!")
     print("="*50)

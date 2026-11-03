@@ -623,11 +623,33 @@ async def simulate_live_call(clinic_id: str = DEFAULT_CLINIC_ID):
         )
         session.add(call)
 
-        # 3. Create confirmed Appointment
+        # 3. Create confirmed Appointment (avoiding double booking)
         tomorrow = now.date() + datetime.timedelta(days=1)
         if tomorrow.weekday() == 6:  # Skip Sunday
             tomorrow += datetime.timedelta(days=1)
+
+        existing_appts = (await session.execute(
+            select(Appointment.starts_at).where(
+                Appointment.doctor_id == doctor_id,
+                Appointment.status != "cancelled"
+            )
+        )).scalars().all()
+        existing_times = {a.astimezone(tz) for a in existing_appts}
+
+        slot_hour = 10
+        slot_min = 0
         starts_at = datetime.datetime.combine(tomorrow, datetime.time(10, 0), tzinfo=tz)
+        while True:
+            candidate = datetime.datetime.combine(tomorrow, datetime.time(slot_hour, slot_min), tzinfo=tz)
+            if candidate not in existing_times:
+                starts_at = candidate
+                break
+            slot_min += 15
+            if slot_min >= 60:
+                slot_min = 0
+                slot_hour += 1
+            if slot_hour >= 17:
+                break
 
         appt_id = _uuid.uuid4()
         appt = Appointment(
