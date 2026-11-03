@@ -182,32 +182,7 @@ def load_live_calls() -> list[dict[str, Any]]:
             return json.loads(LIVE_CALLS_FILE.read_text(encoding="utf-8"))
         except Exception:
             pass
-    # Baseline recorded session from live phone test
-    return [
-        {
-            "id": "call-live-akshay-01",
-            "callerNumber": "+91 98****3210",
-            "patientName": "Akshay",
-            "patientNameMl": "അക്ഷയ്",
-            "language": "ml-IN",
-            "durationSec": 72,
-            "outcome": "Booked",
-            "timestamp": "Today at 10:41 AM",
-            "consentGiven": True,
-            "recordingKey": "recordings/call-live-akshay-01.wav",
-            "audioUrl": "/api/calls/live/call-live-akshay-01/audio",
-            "summary": "Confirmed appointment with Dr. Manoj for tomorrow at 10:00 AM. Caller confirmed slot availability and concluded with polite farewell.",
-            "transcript": [
-                {"speaker": "Agent", "text": "നമസ്കാരം, ശ്രീരുദ്ര ആയുർവേദ ആശുപത്രിയിലേക്ക് സ്വാഗതം. ഞാൻ ഒരു AI അസിസ്റ്റന്റാണ്. ഇന്ന് ഞാൻ നിങ്ങളെ എങ്ങനെയാണ് സഹായിക്കേണ്ടത്?"},
-                {"speaker": "Caller", "text": "ഡോക്ടർ മനോജ് നാളെ ലഭ്യമാണോ?"},
-                {"speaker": "Agent", "text": "അതെ, ഡോക്ടർ മനോജ് നാളെ ലഭ്യമാണ്. രാവിലെ 10:00, 11:30, ഉച്ചയ്ക്ക് 2:30, 4:00 എന്നീ സമയങ്ങളിൽ സ്ലോട്ടുകൾ ഉണ്ട്. ഇതിൽ ഏത് സമയമാണ് സൗകര്യം?"},
-                {"speaker": "Caller", "text": "എന്റെ പേര് Akshay"},
-                {"speaker": "Agent", "text": "നന്ദി അക്ഷയ്, നാളെ രാവിലെ 10:00 മണി മതിയോ?"},
-                {"speaker": "Caller", "text": "മതി മതി."},
-                {"speaker": "Agent", "text": "തീർച്ചയായും അക്ഷയ്, നാളെ രാവിലെ 10:00 മണിക്ക് ഡോക്ടർ മനോജിന്റെ അപ്പോയിന്റ്മെന്റ് ബുക്ക് ചെയ്തിരിക്കുന്നു."},
-                {"speaker": "Caller", "text": "ഓക്കേ."},
-                {"speaker": "Agent", "text": "നന്ദി! നല്ലൊരു ദിവസം ആശംസിക്കുന്നു."}
-            ]
+    return []
         }
     ]
 

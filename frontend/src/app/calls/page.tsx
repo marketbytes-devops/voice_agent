@@ -1,12 +1,13 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+import { Phone } from "lucide-react";
 import {
   CallListSection,
   CallDetailPlayerSection,
   TranscriptViewerSection,
 } from "@/components/pages/calls";
-import { MOCK_CALLS, CallRecord } from "@/lib/mockData";
+import { CallRecord } from "@/lib/mockData";
 
 export default function CallsPage() {
   const [calls, setCalls] = useState<CallRecord[]>([]);
@@ -21,19 +22,20 @@ export default function CallsPage() {
         const res = await fetch(`${apiUrl}/api/calls/live`, { cache: "no-store" });
         if (res.ok) {
           const data = await res.json();
-          if (Array.isArray(data) && data.length > 0) {
+          if (Array.isArray(data)) {
             setCalls(data);
-            setSelectedCall(data[0]);
+            setSelectedCall(data.length > 0 ? data[0] : null);
             setIsLive(true);
             setIsLoading(false);
             return;
           }
         }
       } catch (err) {
-        console.warn("Could not fetch live calls from cloud API, using fallback:", err);
+        console.warn("Could not fetch live calls from API:", err);
       }
-      setCalls(MOCK_CALLS);
-      setSelectedCall(MOCK_CALLS[0]);
+      setCalls([]);
+      setSelectedCall(null);
+      setIsLive(true);
       setIsLoading(false);
     }
     fetchLiveCalls();
@@ -62,6 +64,16 @@ export default function CallsPage() {
             <span className="w-4 h-4 rounded-full border-2 border-emerald-500 border-t-transparent animate-spin" />
             Loading live call recordings from database...
           </div>
+        </div>
+      ) : calls.length === 0 ? (
+        <div className="bg-slate-900/40 border border-slate-800 rounded-2xl p-16 text-center max-w-lg mx-auto my-12">
+          <div className="w-14 h-14 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center mx-auto text-emerald-400 mb-4">
+            <Phone className="w-7 h-7" />
+          </div>
+          <h3 className="text-lg font-semibold text-white">No Phone Calls Recorded Yet</h3>
+          <p className="text-xs text-slate-400 mt-2 leading-relaxed">
+            Real telephone calls received or handled by the AI voice assistant will appear here automatically with full Malayalam transcripts, AI summaries, and encrypted audio recordings.
+          </p>
         </div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 min-h-[680px]">

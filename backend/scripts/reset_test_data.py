@@ -7,7 +7,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from pathlib import Path
+import sys
 import uuid
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
 from sqlalchemy import text
 from backend.app.core.database import get_session_factory
 
@@ -57,9 +62,15 @@ async def reset_test_data() -> None:
         logger.info("Purged %d consent logs.", res_consent.rowcount)
 
         await session.commit()
-        logger.info("Successfully reset all test data for ClinicVoice! All counters are now at 0.")
+
+    # 6. Wipe local json storage if exists
+    live_calls_file = Path(__file__).resolve().parents[2] / "storage" / "live_calls.json"
+    if live_calls_file.exists():
+        live_calls_file.unlink()
+        logger.info("Removed local live_calls.json file.")
+
+    logger.info("Successfully reset all test data for ClinicVoice! All counters are now at 0.")
 
 
 if __name__ == "__main__":
     asyncio.run(reset_test_data())
-

@@ -112,65 +112,7 @@ export const MOCK_APPOINTMENTS: AppointmentRecord[] = [
   },
 ];
 
-export const MOCK_CALLS: CallRecord[] = [
-  {
-    id: "call-901",
-    callerNumber: "+91 98765 43210",
-    patientName: "Ananthakrishnan Nair",
-    patientNameMl: "അനന്തകൃഷ്ണൻ നായർ",
-    language: "ml-IN",
-    durationSec: 84,
-    outcome: "Booked",
-    timestamp: "10 minutes ago",
-    consentGiven: true,
-    recordingKey: "sreerudra/2026/10/call-901.wav",
-    summary: "Patient inquired about knee joint pain. Booked consultation with Dr. Manoj for tomorrow 9:30 AM after confirmation readback.",
-    transcript: [
-      { speaker: "Agent", text: "നമസ്കാരം! ശ്രീരുദ്ര ആയുർവേദ ഹോസ്പിറ്റലിലേക്ക് സ്വാഗതം. ഞാൻ ഒരു എ.ഐ അസിസ്റ്റന്റ് ആണ്. സേവന നിലവാരം ഉറപ്പുവരുത്തുന്നതിനായി ഈ കോൾ റെക്കോർഡ് ചെയ്തോട്ടെ?" },
-      { speaker: "Caller", text: "അതെ റെക്കോർഡ് ചെയ്തോളൂ. നാളെ ഡോക്ടർ മനോജിന് കാണാൻ സമയം ഉണ്ടോ?" },
-      { speaker: "Agent", text: "ഡോക്ടർ മനോജ് നാളെ രാവിലെ ഒൻപത് മുപ്പതിനും വൈകുന്നേരം നാല് മണിക്കും ലഭ്യമാണ്. ഏത് സമയമാണ് താങ്കൾക്ക് സൗകര്യം?" },
-      { speaker: "Caller", text: "രാവിലെ ഒൻപത് മുപ്പത് ആവട്ടെ." },
-      { speaker: "Agent", text: "ശരി. താങ്കളുടെ വിവരങ്ങൾ ഞാൻ വായിക്കാം: പേര് അനന്തകൃഷ്ണൻ നായർ, ഫോൺ നമ്പർ ഒൻപത് എട്ട് ഏഴ് ആറ് അഞ്ച് നാല് മൂന്ന് രണ്ട് ഒന്ന് പൂജ്യം. ബുക്കിംഗ് സ്ഥിരീകരിക്കട്ടെ?" },
-      { speaker: "Caller", text: "അതെ ശരിയാണ്, സ്ഥിരീകരിച്ചോളൂ." },
-      { speaker: "Agent", text: "താങ്കളുടെ അപ്പോയിന്റ്മെന്റ് ബുക്ക് ചെയ്തിരിക്കുന്നു. എസ്.എം.എസ് അയച്ചിട്ടുണ്ട്. നന്ദി!" },
-    ],
-  },
-  {
-    id: "call-902",
-    callerNumber: "+91 94470 55555",
-    patientName: "Thomas Mathew",
-    language: "en-IN",
-    durationSec: 62,
-    outcome: "Inquiry Answered",
-    timestamp: "32 minutes ago",
-    consentGiven: true,
-    recordingKey: "sreerudra/2026/10/call-902.wav",
-    summary: "Caller asked for Panchakarma treatment packages and hospital location near Alappuzha boat jetty.",
-    transcript: [
-      { speaker: "Agent", text: "Hello! Welcome to Sreerudra Ayurveda Hospital. How can I assist you today?" },
-      { speaker: "Caller", text: "Hi, do you offer 7-day Panchakarma packages, and where are you located?" },
-      { speaker: "Agent", text: "Yes, we offer specialized 7-day, 14-day, and 21-day authentic Panchakarma packages. We are located near Cullen Road, Alappuzha. Would you like to consult our doctor?" },
-      { speaker: "Caller", text: "Okay, I will discuss with my family and call back. Thank you." },
-    ],
-  },
-  {
-    id: "call-903",
-    callerNumber: "+91 98951 22334",
-    patientName: "Sujatha K",
-    patientNameMl: "സുജാത കെ",
-    language: "ml-IN",
-    durationSec: 45,
-    outcome: "Callback Created",
-    timestamp: "1 hour ago",
-    consentGiven: false,
-    summary: "Caller asked for room tariff for inpatient rejuvenation therapy. Transferred to reception desk callback.",
-    transcript: [
-      { speaker: "Agent", text: "നമസ്കാരം! ശ്രീരുദ്ര ആയുർവേദ ഹോസ്പിറ്റലിലേക്ക് സ്വാഗതം. ഈ കോൾ റെക്കോർഡ് ചെയ്തോട്ടെ?" },
-      { speaker: "Caller", text: "റെക്കോർഡിങ് വേണ്ട. ഐ.പി റൂം വാടക എത്രയാണെന്ന് അറിയാൻ വിളിച്ചതാണ്." },
-      { speaker: "Agent", text: "തീർച്ചയായും. ഐ.പി അഡ്മിഷൻ സംബന്ധിച്ച കൃത്യമായ വിവരങ്ങൾ നൽകാൻ ഞാൻ ഞങ്ങളുടെ ഫ്രണ്ട് ഡെസ്ക് സ്റ്റാഫിനോട് താങ്കളെ തിരികെ വിളിക്കാൻ പറയാം." },
-    ],
-  },
-];
+export const MOCK_CALLS: CallRecord[] = [];
 
 export const MOCK_CALLBACKS: CallbackTaskItem[] = [
   {
