@@ -2,13 +2,14 @@
 
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
-import { PhoneCall, ShieldCheck, ShieldAlert, ArrowUpRight } from "lucide-react";
+import { PhoneCall, PhoneOff, ArrowUpRight } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardDescription } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
-import { MOCK_CALLS, CallRecord } from "@/lib/mockData";
+import { CallRecord } from "@/lib/mockData";
 
 export function RecentCallsSection() {
-  const [calls, setCalls] = useState<CallRecord[]>(MOCK_CALLS.slice(0, 4));
+  const [calls, setCalls] = useState<CallRecord[]>([]);
+  const [isLoaded, setIsLoaded] = useState<boolean>(false);
 
   useEffect(() => {
     async function fetchRecentCalls() {
@@ -17,12 +18,14 @@ export function RecentCallsSection() {
         const res = await fetch(`${apiUrl}/api/calls/live`, { cache: "no-store" });
         if (res.ok) {
           const data = await res.json();
-          if (Array.isArray(data) && data.length > 0) {
+          if (Array.isArray(data)) {
             setCalls(data.slice(0, 4));
           }
         }
       } catch (err) {
         console.warn("Could not fetch recent live calls:", err);
+      } finally {
+        setIsLoaded(true);
       }
     }
     fetchRecentCalls();
@@ -48,41 +51,51 @@ export function RecentCallsSection() {
         </Link>
       </CardHeader>
 
-      <div className="divide-y divide-slate-800/80">
-        {calls.map((call) => (
-          <div key={call.id} className="py-3.5 flex items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-slate-800 flex items-center justify-center text-teal-400 font-semibold shrink-0">
-                <PhoneCall className="w-4 h-4" />
-              </div>
-              <div>
-                <div className="font-semibold text-sm text-slate-100 flex items-center gap-2">
-                  <span>{call.patientName}</span>
-                  {call.patientNameMl && (
-                    <span className="text-xs text-teal-400 font-malayalam">({call.patientNameMl})</span>
-                  )}
+      {calls.length === 0 ? (
+        <div className="py-12 text-center text-slate-500 flex flex-col items-center justify-center">
+          <PhoneOff className="w-8 h-8 text-slate-600 mb-2" />
+          <p className="text-sm font-medium text-slate-400">No calls recorded yet</p>
+          <p className="text-xs text-slate-500 mt-1 max-w-xs">
+            Inbound calls handled by the Exotel AI voicebot will appear here with audio playback.
+          </p>
+        </div>
+      ) : (
+        <div className="divide-y divide-slate-800/80">
+          {calls.map((call) => (
+            <div key={call.id} className="py-3.5 flex items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-slate-800 flex items-center justify-center text-teal-400 font-semibold shrink-0">
+                  <PhoneCall className="w-4 h-4" />
                 </div>
-                <div className="text-xs text-slate-400 mt-0.5 flex items-center gap-2">
-                  <span>{call.callerNumber}</span>
-                  <span>•</span>
-                  <span>{call.durationSec}s</span>
-                  <span>•</span>
-                  <span>{call.timestamp}</span>
+                <div>
+                  <div className="font-semibold text-sm text-slate-100 flex items-center gap-2">
+                    <span>{call.patientName}</span>
+                    {call.patientNameMl && (
+                      <span className="text-xs text-teal-400 font-malayalam">({call.patientNameMl})</span>
+                    )}
+                  </div>
+                  <div className="text-xs text-slate-400 mt-0.5 flex items-center gap-2">
+                    <span>{call.callerNumber}</span>
+                    <span>•</span>
+                    <span>{call.durationSec}s</span>
+                    <span>•</span>
+                    <span>{call.timestamp}</span>
+                  </div>
                 </div>
               </div>
-            </div>
 
-            <div className="flex items-center gap-2.5 shrink-0">
-              <Badge variant={call.language === "ml-IN" ? "malayalam" : "info"}>
-                {call.language === "ml-IN" ? "മലയാളം (ml)" : "English (en)"}
-              </Badge>
-              <Badge variant={call.outcome === "Booked" ? "success" : "neutral"}>
-                {call.outcome}
-              </Badge>
+              <div className="flex items-center gap-2.5 shrink-0">
+                <Badge variant={call.language === "ml-IN" ? "malayalam" : "info"}>
+                  {call.language === "ml-IN" ? "മലയാളം (ml)" : "English (en)"}
+                </Badge>
+                <Badge variant={call.outcome === "Booked" ? "success" : "neutral"}>
+                  {call.outcome}
+                </Badge>
+              </div>
             </div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
     </Card>
   );
 }

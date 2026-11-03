@@ -1,10 +1,10 @@
 "use client";
 
 import React, { useState } from "react";
-import { Calendar as CalendarIcon, Clock, User, Filter } from "lucide-react";
+import { Calendar as CalendarIcon, Filter, CalendarX2 } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardDescription } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
-import { MOCK_APPOINTMENTS, MOCK_DOCTORS, AppointmentRecord, DoctorItem } from "@/lib/mockData";
+import { AppointmentRecord, DoctorItem } from "@/lib/mockData";
 
 interface CalendarGridSectionProps {
   appointments?: AppointmentRecord[];
@@ -12,13 +12,13 @@ interface CalendarGridSectionProps {
 }
 
 export function CalendarGridSection({
-  appointments = MOCK_APPOINTMENTS,
-  doctors = MOCK_DOCTORS,
+  appointments = [],
+  doctors = [],
 }: CalendarGridSectionProps) {
   const [selectedDoctor, setSelectedDoctor] = useState<string>("all");
 
-  const displayAppointments = appointments && appointments.length > 0 ? appointments : MOCK_APPOINTMENTS;
-  const displayDoctors = doctors && doctors.length > 0 ? doctors : MOCK_DOCTORS;
+  const displayAppointments = appointments;
+  const displayDoctors = doctors;
 
   const filtered = selectedDoctor === "all"
     ? displayAppointments
@@ -66,30 +66,44 @@ export function CalendarGridSection({
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-800/60">
-            {filtered.map((appt) => (
-              <tr key={appt.id} className="hover:bg-slate-900/40 transition-colors">
-                <td className="px-4 py-3.5 font-bold font-mono text-emerald-400 whitespace-nowrap">
-                  {appt.timeStr}
-                </td>
-                <td className="px-4 py-3.5 font-semibold text-white">
-                  {appt.patientName}
-                </td>
-                <td className="px-4 py-3.5 text-xs text-slate-400 font-mono">
-                  {appt.patientPhone}
-                </td>
-                <td className="px-4 py-3.5 text-xs text-slate-300">
-                  {appt.doctorName}
-                </td>
-                <td className="px-4 py-3.5 text-xs text-slate-400">
-                  {appt.treatmentName}
-                </td>
-                <td className="px-4 py-3.5 text-right">
-                  <Badge variant={appt.status === "confirmed" ? "success" : "warning"}>
-                    {appt.status.toUpperCase()}
-                  </Badge>
+            {filtered.length === 0 ? (
+              <tr>
+                <td colSpan={6} className="px-4 py-12 text-center text-slate-500">
+                  <div className="flex flex-col items-center justify-center">
+                    <CalendarX2 className="w-8 h-8 text-slate-600 mb-2" />
+                    <p className="text-sm font-medium text-slate-400">No scheduled appointments found</p>
+                    <p className="text-xs text-slate-500 mt-1">
+                      Live bookings confirmed during phone calls will appear on this calendar grid.
+                    </p>
+                  </div>
                 </td>
               </tr>
-            ))}
+            ) : (
+              filtered.map((appt) => (
+                <tr key={appt.id} className="hover:bg-slate-900/40 transition-colors">
+                  <td className="px-4 py-3.5 font-bold font-mono text-emerald-400 whitespace-nowrap">
+                    {appt.timeStr}
+                  </td>
+                  <td className="px-4 py-3.5 font-semibold text-white">
+                    {appt.patientName}
+                  </td>
+                  <td className="px-4 py-3.5 text-xs text-slate-400 font-mono">
+                    {appt.patientPhone}
+                  </td>
+                  <td className="px-4 py-3.5 text-xs text-slate-300">
+                    {appt.doctorName}
+                  </td>
+                  <td className="px-4 py-3.5 text-xs text-slate-400">
+                    {appt.treatmentName}
+                  </td>
+                  <td className="px-4 py-3.5 text-right">
+                    <Badge variant={appt.status === "confirmed" || appt.status === "booked" ? "success" : "warning"}>
+                      {appt.status.toUpperCase()}
+                    </Badge>
+                  </td>
+                </tr>
+              ))
+            )}
           </tbody>
         </table>
       </div>

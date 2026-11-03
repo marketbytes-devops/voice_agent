@@ -1,17 +1,44 @@
 "use client";
 
-import React, { useState } from "react";
-import { CheckCircle2, Clock, Phone, AlertCircle } from "lucide-react";
+import React, { useState, useEffect } from "react";
+import { CheckCircle2, Clock, Phone } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardDescription } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
-import { MOCK_CALLBACKS, CallbackTaskItem } from "@/lib/mockData";
+import { CallbackTaskItem } from "@/lib/mockData";
 
 export function CallbackTasksSection() {
-  const [tasks, setTasks] = useState<CallbackTaskItem[]>(MOCK_CALLBACKS);
+  const [tasks, setTasks] = useState<CallbackTaskItem[]>([]);
+  const [isLoaded, setIsLoaded] = useState<boolean>(false);
 
-  const resolveTask = (id: string) => {
+  useEffect(() => {
+    async function fetchCallbacks() {
+      try {
+        const apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://voice-agent-pphb.onrender.com";
+        const res = await fetch(`${apiUrl}/api/callbacks`, { cache: "no-store" });
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data)) {
+            setTasks(data);
+          }
+        }
+      } catch (err) {
+        console.warn("Could not fetch callback tasks:", err);
+      } finally {
+        setIsLoaded(true);
+      }
+    }
+    fetchCallbacks();
+  }, []);
+
+  const resolveTask = async (id: string) => {
     setTasks((prev) => prev.filter((t) => t.id !== id));
+    try {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://voice-agent-pphb.onrender.com";
+      await fetch(`${apiUrl}/api/callbacks/${id}/resolve`, { method: "POST" });
+    } catch (err) {
+      console.warn("Failed to resolve callback in backend:", err);
+    }
   };
 
   return (

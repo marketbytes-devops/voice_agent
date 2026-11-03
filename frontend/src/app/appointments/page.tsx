@@ -2,11 +2,11 @@
 
 import React, { useState, useEffect } from "react";
 import { DoctorScheduleSection, CalendarGridSection } from "@/components/pages/appointments";
-import { MOCK_APPOINTMENTS, MOCK_DOCTORS, AppointmentRecord, DoctorItem } from "@/lib/mockData";
+import { MOCK_DOCTORS, AppointmentRecord, DoctorItem } from "@/lib/mockData";
 
 export default function AppointmentsPage() {
   const [doctors, setDoctors] = useState<DoctorItem[]>(MOCK_DOCTORS);
-  const [appointments, setAppointments] = useState<AppointmentRecord[]>(MOCK_APPOINTMENTS);
+  const [appointments, setAppointments] = useState<AppointmentRecord[]>([]);
   const [isLive, setIsLive] = useState<boolean>(false);
 
   useEffect(() => {
@@ -28,7 +28,7 @@ export default function AppointmentsPage() {
 
         if (apptRes.ok) {
           const apptData = await apptRes.json();
-          if (Array.isArray(apptData) && apptData.length > 0) {
+          if (Array.isArray(apptData)) {
             setAppointments(apptData);
             setIsLive(true);
           }

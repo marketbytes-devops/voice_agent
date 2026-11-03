@@ -1,15 +1,44 @@
 "use client";
 
-import React from "react";
+import React, { useState, useEffect } from "react";
 import { PhoneCall, CalendarCheck, Clock, Award } from "lucide-react";
 import { Card } from "@/components/ui/Card";
-import { MOCK_CLINIC } from "@/lib/mockData";
+
+interface LiveStats {
+  todayCallsCount: number;
+  todayAppointmentsCount: number;
+  pendingCallbacksCount: number;
+  agentAccuracy: number;
+}
 
 export function QuickStatsSection() {
+  const [statsData, setStatsData] = useState<LiveStats>({
+    todayCallsCount: 0,
+    todayAppointmentsCount: 0,
+    pendingCallbacksCount: 0,
+    agentAccuracy: 100.0,
+  });
+
+  useEffect(() => {
+    async function fetchStats() {
+      try {
+        const apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://voice-agent-pphb.onrender.com";
+        const res = await fetch(`${apiUrl}/api/stats`, { cache: "no-store" });
+        if (res.ok) {
+          const data = await res.json();
+          setStatsData(data);
+        }
+      } catch (err) {
+        console.warn("Could not fetch real-time stats from API:", err);
+      }
+    }
+    fetchStats();
+  }, []);
+
   const stats = [
     {
       label: "Calls Handled Today",
-      value: MOCK_CLINIC.todayCallsCount,
+      value: statsData.todayCallsCount,
       subtext: "100% Inbound 24/7 Answering",
       icon: PhoneCall,
       color: "text-emerald-400",
@@ -18,7 +47,7 @@ export function QuickStatsSection() {
     },
     {
       label: "Appointments Booked",
-      value: MOCK_CLINIC.todayAppointmentsCount,
+      value: statsData.todayAppointmentsCount,
       subtext: "Validated in DB Transaction",
       icon: CalendarCheck,
       color: "text-teal-400",
@@ -27,7 +56,7 @@ export function QuickStatsSection() {
     },
     {
       label: "Pending Callback Tasks",
-      value: MOCK_CLINIC.pendingCallbacksCount,
+      value: statsData.pendingCallbacksCount,
       subtext: "Created by Agent for Staff",
       icon: Clock,
       color: "text-amber-400",
@@ -36,7 +65,7 @@ export function QuickStatsSection() {
     },
     {
       label: "AI Tool Precision",
-      value: `${MOCK_CLINIC.agentAccuracy}%`,
+      value: `${statsData.agentAccuracy}%`,
       subtext: "0 Medical Hallucinations",
       icon: Award,
       color: "text-sky-400",
