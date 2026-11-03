@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pydantic import BaseModel
+
 import logging
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -413,4 +415,137 @@ async def resolve_callback_task(task_id: str, clinic_id: str = DEFAULT_CLINIC_ID
     except Exception as e:
         logger.warning("Could not resolve callback task: %s", e)
         return {"success": False, "error": str(e)}
+
+class CreateFaqRequest(BaseModel):
+    question: str
+    answer: str
+    questionMl: str | None = None
+    answerMl: str | None = None
+    category: str = "General"
+    language: str = "ml-IN"
+
+
+@app.get("/api/faqs")
+async def get_clinic_faqs(clinic_id: str = DEFAULT_CLINIC_ID):
+    """Retrieve all active hospital FAQs from Supabase."""
+    try:
+        import uuid as _uuid
+        from sqlalchemy import select, text
+        from backend.app.core.database import get_session_factory
+        from backend.app.models import FAQEntry
+        clean_clinic_id = str(_uuid.UUID(clinic_id))
+        factory = get_session_factory()
+        async with factory() as session:
+            await session.execute(text(f"SET LOCAL app.clinic_id = '{clean_clinic_id}'"))
+            stmt = select(FAQEntry).where(FAQEntry.clinic_id == clean_clinic_id, FAQEntry.active == True)
+            entries = (await session.execute(stmt)).scalars().all()
+            data = []
+            for e in entries:
+                data.append({
+                    "id": str(e.id),
+                    "question": e.question,
+                    "questionMl": e.question,
+                    "answer": e.answer,
+                    "answerMl": e.answer,
+                    "language": e.language,
+                    "category": "Hospital FAQs",
+                })
+            return data
+    except Exception as e:
+        logger.warning("Could not fetch FAQs from DB: %s", e)
+        return []
+
+
+@app.post("/api/faqs")
+async def create_clinic_faq(req: CreateFaqRequest, clinic_id: str = DEFAULT_CLINIC_ID):
+    """Save a new approved hospital FAQ to Supabase with tenant RLS."""
+    try:
+        import uuid as _uuid
+        from sqlalchemy import text
+        from backend.app.core.database import get_session_factory
+        from backend.app.models import FAQEntry
+        clean_clinic_id = str(_uuid.UUID(clinic_id))
+        factory = get_session_factory()
+
+        q_text = req.questionMl or req.question
+        a_text = req.answerMl or req.answer
+
+        faq_id = _uuid.uuid4()
+        async with factory() as session:
+            await session.execute(text(f"SET LOCAL app.clinic_id = '{clean_clinic_id}'"))
+            new_faq = FAQEntry(
+                id=faq_id,
+                clinic_id=_uuid.UUID(clean_clinic_id),
+                question=q_text,
+                answer=a_text,
+                language=req.language or "ml-IN",
+                active=True,
+            )
+            session.add(new_faq)
+            await session.commit()
+            return {
+                "success": True,
+                "id": str(faq_id),
+                "question": q_text,
+                "answer": a_text,
+                "language": req.language or "ml-IN",
+                "category": req.category,
+            }
+    except Exception as e:
+        logger.warning("Could not save FAQ to DB: %s", e)
+        return {"success": False, "error": str(e)}
+
+
+@app.delete("/api/faqs/{faq_id}")
+async def delete_clinic_faq(faq_id: str, clinic_id: str = DEFAULT_CLINIC_ID):
+    """Deactivate or remove an FAQ from Supabase."""
+    try:
+        import uuid as _uuid
+        from sqlalchemy import text
+        from backend.app.core.database import get_session_factory
+        clean_clinic_id = str(_uuid.UUID(clinic_id))
+        clean_faq_id = str(_uuid.UUID(faq_id))
+        factory = get_session_factory()
+        async with factory() as session:
+            await session.execute(text(f"SET LOCAL app.clinic_id = '{clean_clinic_id}'"))
+            await session.execute(
+                text(f"UPDATE faq_entries SET active = false WHERE id = '{clean_faq_id}' AND clinic_id = '{clean_clinic_id}'")
+            )
+            await session.commit()
+            return {"success": True, "id": clean_faq_id}
+    except Exception as e:
+        logger.warning("Could not delete FAQ: %s", e)
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/api/treatments")
+async def get_clinic_treatments(clinic_id: str = DEFAULT_CLINIC_ID):
+    """Retrieve all approved Ayurvedic treatments from Supabase."""
+    try:
+        import uuid as _uuid
+        from sqlalchemy import select, text
+        from backend.app.core.database import get_session_factory
+        from backend.app.models import Treatment
+        clean_clinic_id = str(_uuid.UUID(clinic_id))
+        factory = get_session_factory()
+        async with factory() as session:
+            await session.execute(text(f"SET LOCAL app.clinic_id = '{clean_clinic_id}'"))
+            stmt = select(Treatment).where(Treatment.clinic_id == clean_clinic_id, Treatment.active == True)
+            treatments = (await session.execute(stmt)).scalars().all()
+            data = []
+            for t in treatments:
+                data.append({
+                    "id": str(t.id),
+                    "nameEn": t.name_en,
+                    "nameMl": t.name_ml or t.name_en,
+                    "durationMinutes": t.duration_minutes,
+                    "priceInr": t.price_inr or 500,
+                    "category": t.category or "Ayurvedic Care",
+                    "descriptionEn": t.description_en or "",
+                    "descriptionMl": t.description_ml or "",
+                })
+            return data
+    except Exception as e:
+        logger.warning("Could not fetch treatments from DB: %s", e)
+        return []
 

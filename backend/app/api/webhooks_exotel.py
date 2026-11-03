@@ -21,7 +21,7 @@ from backend.agent.session import CallSession
 
 from backend.app.core.config import settings
 from backend.app.core.database import get_db
-from backend.app.models import Appointment, Call, Clinic, Doctor, Patient, PhoneNumber
+from backend.app.models import Appointment, Call, Clinic, Doctor, FAQEntry, Patient, PhoneNumber, Treatment
 
 logger = logging.getLogger("clinicvoice")
 
@@ -324,25 +324,79 @@ async def handle_exotel_voicebot_websocket(websocket: WebSocket) -> None:
     session_transcript: list[dict[str, str]] = []
     session_start_epoch: float = time.time()
 
-    # Initialize clinical session context (linked to live Supabase clinic)
+    # Initialize clinical session context dynamically from live Supabase tables!
+    db_doctors = [
+        {
+            "id": str(DEFAULT_DOCTOR_ID),
+            "name": "Dr. Manoj",
+            "qualification": "BAMS, MD (Ayurveda)",
+            "specialties": ["Panchakarma", "General Ayurveda"],
+        }
+    ]
+    db_treatments = [
+        {"name": "Panchakarma Consultation", "duration_minutes": 30},
+        {"name": "General Ayurveda Consultation", "duration_minutes": 15},
+    ]
+    faq_knowledge_lines: list[str] = []
+
+    try:
+        from backend.app.core.database import get_session_factory
+        factory = get_session_factory()
+        async with factory() as session:
+            await session.execute(text(f"SET LOCAL app.clinic_id = '{DEFAULT_CLINIC_ID}'"))
+
+            # 1. Fetch active doctors
+            d_res = (await session.execute(
+                select(Doctor).where(Doctor.clinic_id == DEFAULT_CLINIC_ID, Doctor.active == True)
+            )).scalars().all()
+            if d_res:
+                db_doctors = [
+                    {
+                        "id": str(d.id),
+                        "name": d.name,
+                        "qualification": d.qualification or "BAMS, MD",
+                        "specialties": d.specialties or ["General Ayurveda"],
+                    }
+                    for d in d_res
+                ]
+
+            # 2. Fetch active treatments
+            t_res = (await session.execute(
+                select(Treatment).where(Treatment.clinic_id == DEFAULT_CLINIC_ID, Treatment.active == True)
+            )).scalars().all()
+            if t_res:
+                db_treatments = [
+                    {"name": t.name_en, "duration_minutes": t.duration_minutes}
+                    for t in t_res
+                ]
+
+            # 3. Fetch active FAQs
+            f_res = (await session.execute(
+                select(FAQEntry).where(FAQEntry.clinic_id == DEFAULT_CLINIC_ID, FAQEntry.active == True)
+            )).scalars().all()
+            if f_res:
+                for f in f_res:
+                    faq_knowledge_lines.append(f"Q: {f.question}\nA: {f.answer}")
+        logger.info(
+            "Exotel Voicebot: Dynamically loaded %d doctors, %d treatments, and %d FAQs from Supabase.",
+            len(db_doctors),
+            len(db_treatments),
+            len(faq_knowledge_lines),
+        )
+    except Exception as e:
+        logger.warning("Exotel Voicebot: Could not load dynamic context from Supabase (using fallback): %s", e)
+
+    faq_notes = ("\n\nApproved Hospital FAQs:\n" + "\n".join(faq_knowledge_lines)) if faq_knowledge_lines else ""
+
     clinic_context = {
         "clinic_id": str(DEFAULT_CLINIC_ID),
         "clinic_name": "Sreerudra Ayurveda Hospital & Research Centre",
         "timezone": "Asia/Kolkata",
         "working_hours": {"0": {"start": "09:00", "end": "17:00"}},
         "languages": ["ml-IN", "en-IN"],
-        "doctors": [
-            {
-                "id": str(DEFAULT_DOCTOR_ID),
-                "name": "Dr. Manoj",
-                "qualification": "BAMS, MD (Ayurveda)",
-                "specialties": ["Panchakarma", "General Ayurveda"],
-            }
-        ],
-        "treatments": [
-            {"name": "Panchakarma Consultation", "duration_minutes": 30},
-            {"name": "General Ayurveda Consultation", "duration_minutes": 15},
-        ],
+        "doctors": db_doctors,
+        "treatments": db_treatments,
+        "prompt_additions": faq_notes,
     }
     providers = build_providers()
     session = CallSession(
