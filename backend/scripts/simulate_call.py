@@ -51,17 +51,22 @@ async def simulate_call(caller_name: str = "Ananthakrishnan Nair (അനന്�
         visiting_faq = next((f for f in faqs if "4:00" in f.answer or "സന്ദർശന" in f.question), None)
         visiting_answer = visiting_faq.answer if visiting_faq else "സന്ദർശന സമയം ദിവസവും വൈകുന്നേരം 4:00 മണി മുതൽ 7:00 മണി വരെയാണ്."
 
-        # 3. Create Patient
-        pat_id = uuid.uuid4()
-        patient = Patient(
-            id=pat_id,
-            clinic_id=DEFAULT_CLINIC_ID,
-            name=caller_name,
-            phone="+91 98765 43210",
-            preferred_language="ml-IN",
-        )
-        session.add(patient)
-        await session.flush()
+        # 3. Create or Fetch Patient (handles deduplication)
+        p_stmt = select(Patient).where(Patient.clinic_id == DEFAULT_CLINIC_ID, Patient.phone == "+91 98765 43210")
+        patient = (await session.execute(p_stmt)).scalars().first()
+        if not patient:
+            pat_id = uuid.uuid4()
+            patient = Patient(
+                id=pat_id,
+                clinic_id=DEFAULT_CLINIC_ID,
+                name=caller_name,
+                phone="+91 98765 43210",
+                preferred_language="ml-IN",
+            )
+            session.add(patient)
+            await session.flush()
+        else:
+            pat_id = patient.id
 
         # 4. Create Call Record
         call_id = uuid.uuid4()

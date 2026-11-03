@@ -585,17 +585,22 @@ async def simulate_live_call(clinic_id: str = DEFAULT_CLINIC_ID):
         visiting_faq = next((f for f in faqs if "4:00" in f.answer or "സന്ദർശന" in f.question), None)
         visiting_answer = visiting_faq.answer if visiting_faq else "സന്ദർശന സമയം ദിവസവും വൈകുന്നേരം 4:00 മണി മുതൽ 7:00 മണി വരെയാണ്."
 
-        # 1. Create Patient
-        pat_id = _uuid.uuid4()
-        patient = Patient(
-            id=pat_id,
-            clinic_id=_uuid.UUID(clean_clinic_id),
-            name="Ananthakrishnan (അനന്തകൃഷ്ണൻ)",
-            phone="+91 98765 43210",
-            preferred_language="ml-IN",
-        )
-        session.add(patient)
-        await session.flush()
+        # 1. Create or Fetch Patient (handles deduplication)
+        p_stmt = select(Patient).where(Patient.clinic_id == clean_clinic_id, Patient.phone == "+91 98765 43210")
+        patient = (await session.execute(p_stmt)).scalars().first()
+        if not patient:
+            pat_id = _uuid.uuid4()
+            patient = Patient(
+                id=pat_id,
+                clinic_id=_uuid.UUID(clean_clinic_id),
+                name="Ananthakrishnan (അനന്തകൃഷ്ണൻ)",
+                phone="+91 98765 43210",
+                preferred_language="ml-IN",
+            )
+            session.add(patient)
+            await session.flush()
+        else:
+            pat_id = patient.id
 
         # 2. Create Call record
         call_id = _uuid.uuid4()
