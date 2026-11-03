@@ -549,3 +549,108 @@ async def get_clinic_treatments(clinic_id: str = DEFAULT_CLINIC_ID):
         logger.warning("Could not fetch treatments from DB: %s", e)
         return []
 
+
+
+@app.post("/api/test/simulate-call")
+async def simulate_live_call(clinic_id: str = DEFAULT_CLINIC_ID):
+    """
+    Simulates a live inbound telephone consultation session without dialing an Exotel number.
+    Queries active doctors & FAQs from Supabase, creates patient, commits call record with
+    Malayalam transcript and summary, commits confirmed appointment with Dr. Manoj for tomorrow at 10:00 AM,
+    and returns the created call and appointment details.
+    """
+    import datetime, uuid as _uuid
+    from zoneinfo import ZoneInfo
+    from sqlalchemy import select, text
+    from backend.app.core.database import get_session_factory
+    from backend.app.models import Appointment, Call, Doctor, FAQEntry, Patient
+
+    clean_clinic_id = str(_uuid.UUID(clinic_id))
+    factory = get_session_factory()
+    tz = ZoneInfo("Asia/Kolkata")
+    now = datetime.datetime.now(tz)
+
+    async with factory() as session:
+        await session.execute(text(f"SET LOCAL app.clinic_id = '{clean_clinic_id}'"))
+
+        # Find active doctor
+        d_stmt = select(Doctor).where(Doctor.clinic_id == clean_clinic_id, Doctor.active == True)
+        doctor = (await session.execute(d_stmt)).scalars().first()
+        doctor_id = doctor.id if doctor else None
+        doctor_name = doctor.name if doctor else "Dr. Manoj"
+
+        # Find visiting hours FAQ
+        f_stmt = select(FAQEntry).where(FAQEntry.clinic_id == clean_clinic_id, FAQEntry.active == True)
+        faqs = (await session.execute(f_stmt)).scalars().all()
+        visiting_faq = next((f for f in faqs if "4:00" in f.answer or "സന്ദർശന" in f.question), None)
+        visiting_answer = visiting_faq.answer if visiting_faq else "സന്ദർശന സമയം ദിവസവും വൈകുന്നേരം 4:00 മണി മുതൽ 7:00 മണി വരെയാണ്."
+
+        # 1. Create Patient
+        pat_id = _uuid.uuid4()
+        patient = Patient(
+            id=pat_id,
+            clinic_id=_uuid.UUID(clean_clinic_id),
+            name="Ananthakrishnan (അനന്തകൃഷ്ണൻ)",
+            phone="+91 98765 43210",
+            preferred_language="ml-IN",
+        )
+        session.add(patient)
+        await session.flush()
+
+        # 2. Create Call record
+        call_id = _uuid.uuid4()
+        call = Call(
+            id=call_id,
+            clinic_id=_uuid.UUID(clean_clinic_id),
+            patient_id=pat_id,
+            caller_number="+91 98****3210",
+            language="ml-IN",
+            started_at=now,
+            ended_at=now + datetime.timedelta(seconds=74),
+            duration_sec=74,
+            outcome="Booked",
+            summary=f"Inquired about patient visiting hours (answered: {visiting_answer}). Confirmed consultation booking with {doctor_name} for tomorrow 10:00 AM.",
+            transcript={
+                "turns": [
+                    {"speaker": "Agent", "text": "നമസ്കാരം! ശ്രീരുദ്ര ആയുർവേദ ഹോസ്പിറ്റലിലേക്ക് സ്വാഗതം. ഞാൻ ഒരു AI അസിസ്റ്റന്റാണ്. ഇന്ന് ഞാൻ നിങ്ങളെ എങ്ങനെയാണ് സഹായിക്കേണ്ടത്?"},
+                    {"speaker": "Caller", "text": "സന്ദർശന സമയം എപ്പോഴാണ്? പിന്നെ ഡോക്ടർ മനോജിന് നാളെ ഒരു അപ്പോയിന്റ്മെന്റ് ബുക്ക് ചെയ്യണം."},
+                    {"speaker": "Agent", "text": f"{visiting_answer} തീർച്ചയായും, നാളെ രാവിലെ 10:00 മണിക്ക് ഡോക്ടർ മനോജിന്റെ കൺസൾട്ടേഷൻ ലഭ്യമാണ്."},
+                    {"speaker": "Caller", "text": "എന്റെ പേര് അനന്തകൃഷ്ണൻ, 10 മണി ബുക്ക് ചെയ്തോളൂ."},
+                    {"speaker": "Agent", "text": "നന്ദി അനന്തകൃഷ്ണൻ! നാളെ രാവിലെ 10:00 മണിക്ക് ഡോക്ടർ മനോജിന്റെ അപ്പോയിന്റ്മെന്റ് വിജയകരമായി രേഖപ്പെടുത്തിയിട്ടുണ്ട്."}
+                ]
+            },
+            recording_key="recordings/call-live-sample.wav",
+        )
+        session.add(call)
+
+        # 3. Create confirmed Appointment
+        tomorrow = now.date() + datetime.timedelta(days=1)
+        if tomorrow.weekday() == 6:  # Skip Sunday
+            tomorrow += datetime.timedelta(days=1)
+        starts_at = datetime.datetime.combine(tomorrow, datetime.time(10, 0), tzinfo=tz)
+
+        appt_id = _uuid.uuid4()
+        appt = Appointment(
+            id=appt_id,
+            clinic_id=_uuid.UUID(clean_clinic_id),
+            patient_id=pat_id,
+            doctor_id=doctor_id,
+            starts_at=starts_at,
+            ends_at=starts_at + datetime.timedelta(minutes=15),
+            status="booked",
+            source="voice_agent",
+            call_id=call_id,
+            reason="Ayurvedic Consultation booked via voice assistant",
+        )
+        session.add(appt)
+        await session.commit()
+
+        return {
+            "success": True,
+            "callId": str(call_id),
+            "patientName": "Ananthakrishnan (അനന്തകൃഷ്ണൻ)",
+            "doctorName": doctor_name,
+            "appointmentTime": starts_at.strftime("%I:%M %p, %d %b %Y"),
+            "outcome": "Booked",
+            "message": "Simulated live call successfully processed and saved to Supabase!",
+        }
