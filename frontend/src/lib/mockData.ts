@@ -21,7 +21,7 @@ export interface AppointmentRecord {
   treatmentName: string;
   timeStr: string;
   dateStr: string;
-  status: "confirmed" | "completed" | "cancelled" | "rescheduled";
+  status: "confirmed" | "booked" | "completed" | "cancelled" | "rescheduled";
   visitType: string;
 }
 

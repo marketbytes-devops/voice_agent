@@ -681,3 +681,220 @@ async def simulate_live_call(clinic_id: str = DEFAULT_CLINIC_ID):
             "outcome": "Booked",
             "message": "Simulated live call successfully processed and saved to Supabase!",
         }
+
+
+# -------------------------------------------------------------
+# Interactive In-Browser SaaS Voice Phone Endpoints
+# -------------------------------------------------------------
+from pydantic import BaseModel as _BaseModel
+
+class WebCallTurnRequest(_BaseModel):
+    caller_text: str
+    clinic_id: str = DEFAULT_CLINIC_ID
+    conversation_history: list[dict[str, str]] = []
+
+
+@app.post("/api/web-call/turn")
+async def process_web_call_turn(req: WebCallTurnRequest):
+    """
+    Process a conversation turn for in-browser voice testing:
+    Uses live Gemini LLM with dynamic Supabase context (doctors, FAQs, treatments).
+    """
+    import uuid as _uuid
+    from sqlalchemy import select, text
+    import google.generativeai as genai
+    from backend.app.core.config import settings
+    from backend.app.core.database import get_session_factory
+    from backend.app.models import Doctor, FAQEntry
+
+    clean_clinic_id = str(_uuid.UUID(req.clinic_id))
+    factory = get_session_factory()
+
+    doctors_info = "Dr. Manoj: BAMS, MD (Ayurveda), specialties in Panchakarma, Spine & Joint Care, Arthritis. Working hours: 09:00 AM - 05:00 PM."
+    faqs_info = ""
+    async with factory() as session:
+        await session.execute(text(f"SET LOCAL app.clinic_id = '{clean_clinic_id}'"))
+        docs = (await session.execute(select(Doctor).where(Doctor.clinic_id == clean_clinic_id, Doctor.active == True))).scalars().all()
+        if docs:
+            doctors_info = ", ".join([f"{d.name} ({d.qualification or 'Ayurveda'}, specialties: {', '.join(d.specialties or ['General'])})" for d in docs])
+
+        faqs = (await session.execute(select(FAQEntry).where(FAQEntry.clinic_id == clean_clinic_id, FAQEntry.active == True))).scalars().all()
+        faqs_info = "\n".join([f"Q: {f.question}\nA: {f.answer}" for f in faqs])
+
+    system_prompt = f"""You are the polite, respectful, and natural AI receptionist at Sreerudra Ayurveda Hospital & Research Centre, Alappuzha, Kerala.
+You speak warm, fluent, conversational Malayalam (മലയാളം) naturally like a real human hospital receptionist. (If caller speaks English, reply in English).
+
+HOSPITAL INFORMATION:
+- Location: Near General Hospital Junction, Alappuzha, Kerala.
+- Working Hours: Monday to Saturday 9:00 AM to 5:00 PM. Closed Sundays.
+- Active Doctors: {doctors_info}
+- Available Consultation Slots: 15-minute consultations between 9:00 AM and 5:00 PM.
+- Dynamic Knowledge Base FAQs:
+{faqs_info}
+
+CONVERSATIONAL RULES:
+1. Speak concisely in 1-2 natural sentences, just like a real telephone receptionist.
+2. If the patient asks about symptoms (like back pain or joint pain), recommend consulting Dr. Manoj.
+3. If they ask about visiting hours, answer accurately: 4:00 PM to 7:00 PM daily.
+4. When booking an appointment, politely ask their name and preferred time, then confirm: 'തീർച്ചയായും [പേര്], നാളെ രാവിലെ 10:00 മണിക്ക് ഡോക്ടർ മനോജിന്റെ കൺസൾട്ടേഷൻ ബുക്ക് ചെയ്തിരിക്കുന്നു.'
+5. If the caller says thank you or goodbye, conclude with: 'നന്ദി! നല്ലൊരു ദിവസം ആശംസിക്കുന്നു.' and include '[CALL_COMPLETE]' at the end of your message.
+"""
+
+    try:
+        genai.configure(api_key=settings.GEMINI_API_KEY)
+        model = genai.GenerativeModel(
+            model_name="gemini-2.5-flash",
+            system_instruction=system_prompt,
+        )
+
+        history = []
+        for turn in req.conversation_history:
+            role = "user" if turn.get("speaker") == "Caller" else "model"
+            history.append({"role": role, "parts": [turn.get("text", "")]})
+
+        chat = model.start_chat(history=history)
+        response = chat.send_message(req.caller_text)
+        reply_text = response.text.strip()
+    except Exception as e:
+        logger.error("Error generating web call turn with Gemini: %s", e)
+        reply_text = "തീർച്ചയായും, താങ്കളെ സഹായിക്കാൻ സാധിച്ചതിൽ സന്തോഷം. വേറെ എന്തെങ്കിലും അറിയാനുണ്ടോ?"
+
+    is_completed = "[CALL_COMPLETE]" in reply_text
+    reply_text_clean = reply_text.replace("[CALL_COMPLETE]", "").strip()
+
+    is_booked = any(k in reply_text_clean for k in ["ബുക്ക് ചെയ്തിരിക്കുന്നു", "രേഖപ്പെടുത്തിയിട്ടുണ്ട്", "അപ്പോയിന്റ്മെന്റ്"]) and any(k in req.caller_text for k in ["ബുക്ക്", "book", "അപ്പോയിന്റ്മെന്റ്", "appointment"])
+
+    return {
+        "reply": reply_text_clean,
+        "is_completed": is_completed,
+        "is_booked": is_booked,
+    }
+
+
+class SaveWebCallRequest(_BaseModel):
+    patient_name: str = "Akshay (അക്ഷയ്)"
+    caller_number: str = "+91 99473 84437"
+    transcript: list[dict[str, str]] = []
+    outcome: str = "Inquiry Answered"
+    duration_sec: int = 65
+    clinic_id: str = DEFAULT_CLINIC_ID
+
+
+@app.post("/api/web-call/save")
+async def save_web_call(req: SaveWebCallRequest):
+    """Save completed in-browser phone consultation session into Supabase."""
+    import datetime, uuid as _uuid
+    from zoneinfo import ZoneInfo
+    from sqlalchemy import select, text
+    from backend.app.core.database import get_session_factory
+    from backend.app.models import Appointment, Call, Doctor, Patient
+
+    clean_clinic_id = str(_uuid.UUID(req.clinic_id))
+    factory = get_session_factory()
+    tz = ZoneInfo("Asia/Kolkata")
+    now = datetime.datetime.now(tz)
+
+    async with factory() as session:
+        await session.execute(text(f"SET LOCAL app.clinic_id = '{clean_clinic_id}'"))
+
+        # 1. Deduplicate or create patient
+        p_stmt = select(Patient).where(Patient.clinic_id == clean_clinic_id, Patient.phone == req.caller_number)
+        patient = (await session.execute(p_stmt)).scalars().first()
+        if not patient:
+            pat_id = _uuid.uuid4()
+            patient = Patient(
+                id=pat_id,
+                clinic_id=_uuid.UUID(clean_clinic_id),
+                name=req.patient_name,
+                phone=req.caller_number,
+                preferred_language="ml-IN",
+            )
+            session.add(patient)
+            await session.flush()
+        else:
+            pat_id = patient.id
+
+        # 2. Save call record
+        call_id = _uuid.uuid4()
+        started_time = now - datetime.timedelta(seconds=req.duration_sec)
+        summary = f"Interactive telephone consultation with {req.patient_name}. Outcome: {req.outcome}."
+        if len(req.transcript) >= 2:
+            summary = f"Caller inquired about hospital services and doctor availability. Outcome: {req.outcome}."
+
+        call = Call(
+            id=call_id,
+            clinic_id=_uuid.UUID(clean_clinic_id),
+            patient_id=pat_id,
+            caller_number=req.caller_number,
+            language="ml-IN",
+            started_at=started_time,
+            ended_at=now,
+            duration_sec=req.duration_sec,
+            outcome=req.outcome,
+            summary=summary,
+            transcript={"turns": req.transcript},
+            recording_key="recordings/call-live-akshay-01.wav",
+        )
+        session.add(call)
+
+        # 3. If booked, create confirmed appointment with Dr. Manoj
+        appointment_info = None
+        if req.outcome == "Booked":
+            d_stmt = select(Doctor).where(Doctor.clinic_id == clean_clinic_id, Doctor.active == True)
+            doctor = (await session.execute(d_stmt)).scalars().first()
+            doc_id = doctor.id if doctor else _uuid.uuid4()
+            doc_name = doctor.name if doctor else "Dr. Manoj"
+
+            tomorrow = now.date() + datetime.timedelta(days=1)
+            if tomorrow.weekday() == 6:
+                tomorrow += datetime.timedelta(days=1)
+
+            existing_appts = (await session.execute(
+                select(Appointment.starts_at).where(
+                    Appointment.doctor_id == doc_id,
+                    Appointment.status != "cancelled"
+                )
+            )).scalars().all()
+            existing_times = {a.astimezone(tz) for a in existing_appts}
+
+            slot_hour = 10
+            slot_min = 0
+            starts_at = datetime.datetime.combine(tomorrow, datetime.time(10, 0), tzinfo=tz)
+            while True:
+                candidate = datetime.datetime.combine(tomorrow, datetime.time(slot_hour, slot_min), tzinfo=tz)
+                if candidate not in existing_times:
+                    starts_at = candidate
+                    break
+                slot_min += 15
+                if slot_min >= 60:
+                    slot_min = 0
+                    slot_hour += 1
+                if slot_hour >= 17:
+                    break
+
+            appt = Appointment(
+                id=_uuid.uuid4(),
+                clinic_id=_uuid.UUID(clean_clinic_id),
+                patient_id=pat_id,
+                doctor_id=doc_id,
+                starts_at=starts_at,
+                ends_at=starts_at + datetime.timedelta(minutes=15),
+                status="booked",
+                source="voice_agent",
+                call_id=call_id,
+                reason=f"Ayurvedic Consultation with {doc_name}",
+            )
+            session.add(appt)
+            appointment_info = {
+                "doctor": doc_name,
+                "time": starts_at.strftime("%I:%M %p, %A, %d %b %Y"),
+            }
+
+        await session.commit()
+
+        return {
+            "success": True,
+            "call_id": str(call_id),
+            "outcome": req.outcome,
+            "appointment": appointment_info,
+        }
