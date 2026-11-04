@@ -69,22 +69,29 @@ class CallSession:
         """
         if not caller_text.strip():
             self.consecutive_silence_count += 1
-            if self.consecutive_silence_count >= 2:
-                # Ending call politely after repeated silence
+            if self.consecutive_silence_count >= 4:
+                # Ending call politely only after repeated prolonged silence
                 farewell = (
-                    "താങ്കൾ സംസാരിക്കുന്നത് വ്യക്തമല്ല. ഞങ്ങൾ കുറച്ചു കഴിഞ്ഞ് തിരികെ വിളിക്കാം. നന്ദി."
+                    "താങ്കൾ സംസാരിക്കുന്നത് കേൾക്കാൻ സാധിക്കുന്നില്ല. ഞങ്ങളുടെ റിസപ്ഷനിൽ നിന്ന് തിരികെ വിളിക്കാൻ ആവശ്യപ്പെടാം. നന്ദി."
                     if self.lang_manager.current_language == "ml-IN"
                     else "I could not hear any response. We will create a callback for you. Thank you."
                 )
-                await self.tool_executor.execute_tool("request_callback", {"reason": "Call disconnected due to silence"})
+                await self.tool_executor.execute_tool("request_callback", {"reason": "Call disconnected due to prolonged silence"})
                 self.is_active = False
                 return {"type": "hangup", "text": farewell}
 
-            prompt_user = (
-                "ഹലോ? ഞാൻ പറയുന്നത് കേൾക്കാമോ?"
-                if self.lang_manager.current_language == "ml-IN"
-                else "Hello? Are you still on the line?"
-            )
+            if self.consecutive_silence_count == 1:
+                prompt_user = (
+                    "ഹലോ? ഞാൻ പറയുന്നത് കേൾക്കാമോ?"
+                    if self.lang_manager.current_language == "ml-IN"
+                    else "Hello? Are you still on the line?"
+                )
+            else:
+                prompt_user = (
+                    "ക്ഷമിക്കണം, താങ്കൾ പറയുന്നത് കേൾക്കാൻ സാധിക്കുന്നില്ല. ലൈനിലുണ്ടോ?"
+                    if self.lang_manager.current_language == "ml-IN"
+                    else "I'm having trouble hearing you. Are you still there?"
+                )
             return {"type": "speech", "text": prompt_user}
 
         self.consecutive_silence_count = 0

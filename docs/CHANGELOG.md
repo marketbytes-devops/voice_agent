@@ -5,6 +5,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [Phase 8] - 2026-11-04
+### Added
+- **Instant Human-like Interruption (Real-Time Barge-in):** Lowered voice activity threshold from 650.0 to 340.0 RMS, sent carrier-level `event: clear` on interruption to immediately flush telecom gateway audio buffers, and captured initial interruption audio frame directly into the new caller speech turn.
+- **Natural Clarification Handling:** Added detection for inaudible, garbled, or noisy speech, automatically requesting polite Malayalam clarification (*"ക്ഷമിക്കണം, പറഞ്ഞത് വ്യക്തമായി കേട്ടില്ല. ഒന്നുകൂടി പറയാമോ?"*) instead of hallucinating or hanging up.
+- **Line Check Handling:** Direct warm acknowledgment for connectivity queries ("ഹലോ", "കേൾക്കാമോ?"): *"നമസ്കാരം, ഞാൻ കേൾക്കുന്നുണ്ട്. പറയൂ, എന്താണ് അറിയേണ്ടത്?"*.
+- **Tuned Turn-taking VAD:** Extended silence detection from 0.38s to 0.55s, giving callers conversational breathing room and preventing mid-sentence cut-offs.
+- **Conversational Receptionist Guardrails:** Injected strict conversational guidelines in Malayalam and English system prompts enforcing 1-2 sentence concise answers and forbidding disconnects on conversational filler words ("ശരി", "ഓക്കേ").
+- **Extended Silence Tolerance:** Increased silence threshold to 4 consecutive turns before triggering a callback offer, eliminating ghost disconnects.
+
+---
+
 ## [Phase 7] - 2026-11-02
 ### Added
 - **Managed Cloud Database (Supabase Mumbai / ap-south-1):** Provisioned PostgreSQL 17 in AWS Mumbai for ultra-low latency with Indian cellular lines, creating all 18 tables with Row-Level Security (RLS) tenant isolation.
