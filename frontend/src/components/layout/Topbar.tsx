@@ -1,7 +1,8 @@
 "use client";
 
 import React from "react";
-import { Bell, Search, ShieldCheck, UserCheck } from "lucide-react";
+import Link from "next/link";
+import { Bell, Mic, Search, ShieldCheck, UserCheck } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { MOCK_CLINIC } from "@/lib/mockData";
 
@@ -20,6 +21,14 @@ export function Topbar() {
       </div>
 
       <div className="flex items-center gap-4">
+        <Link
+          href="/test-call"
+          className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-400 text-xs font-semibold shadow-sm transition-all"
+        >
+          <Mic className="w-3.5 h-3.5 animate-pulse text-emerald-400" />
+          <span>Test AI Voice Call</span>
+        </Link>
+
         <div className="flex items-center gap-2 pl-3 border-l border-slate-800">
           <div className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-xs font-semibold text-emerald-400">
             SR

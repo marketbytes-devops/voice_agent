@@ -13,6 +13,7 @@ from backend.app.api.auth import router as auth_router
 from backend.app.api.calls import router as calls_router
 from backend.app.api.health import router as health_router
 from backend.app.api.patients import router as patients_router
+from backend.app.api.web_call import router as web_call_router
 from backend.app.api.webhooks_exotel import router as exotel_router
 from backend.app.core.config import settings
 from backend.app.core.logging import setup_logging
@@ -57,6 +58,7 @@ app.include_router(agent_router)
 app.include_router(agent_tools_router)
 app.include_router(patients_router)
 app.include_router(calls_router)
+app.include_router(web_call_router)
 app.include_router(exotel_router)
 
 

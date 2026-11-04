@@ -13,6 +13,7 @@ import {
   ShieldCheck,
   Bot,
   Activity,
+  Mic,
 } from "lucide-react";
 
 export function Sidebar() {
@@ -20,6 +21,7 @@ export function Sidebar() {
 
   const navItems = [
     { label: "Overview", href: "/", icon: LayoutDashboard },
+    { label: "🎙️ Test AI Voice Call", href: "/test-call", icon: Mic },
     { label: "Call History & Audio", href: "/calls", icon: PhoneCall },
     { label: "Appointments & Doctors", href: "/appointments", icon: CalendarDays },
     { label: "Knowledge Base (FAQs)", href: "/knowledge", icon: BookOpen },

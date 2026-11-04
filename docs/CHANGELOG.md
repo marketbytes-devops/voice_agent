@@ -7,6 +7,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Phase 8] - 2026-11-04
 ### Added
+- **Direct Live Web Voice Call Tester (Option A):** Built full-duplex WebSocket endpoint (`/api/voice/web-call`) and interactive web call studio (`frontend/src/app/test-call/page.tsx`), enabling zero-PIN, zero-delay testing directly with microphone and speakers.
+- **Client-Side Instant Barge-in:** Real-time audio halt in browser when user speaks during AI speech, synchronizing with Sarvam AI and Gemini.
+- **Interactive Testing Studio:** Live Malayalam transcript, visual voice activity meter, quick test prompts for Dr. Manoj's schedule, appointment bookings, treatment inquiries, and emergency escalation.
 - **Instant Human-like Interruption (Real-Time Barge-in):** Lowered voice activity threshold from 650.0 to 340.0 RMS, sent carrier-level `event: clear` on interruption to immediately flush telecom gateway audio buffers, and captured initial interruption audio frame directly into the new caller speech turn.
 - **Natural Clarification Handling:** Added detection for inaudible, garbled, or noisy speech, automatically requesting polite Malayalam clarification (*"ക്ഷമിക്കണം, പറഞ്ഞത് വ്യക്തമായി കേട്ടില്ല. ഒന്നുകൂടി പറയാമോ?"*) instead of hallucinating or hanging up.
 - **Line Check Handling:** Direct warm acknowledgment for connectivity queries ("ഹലോ", "കേൾക്കാമോ?"): *"നമസ്കാരം, ഞാൻ കേൾക്കുന്നുണ്ട്. പറയൂ, എന്താണ് അറിയേണ്ടത്?"*.
