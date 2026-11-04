@@ -253,7 +253,29 @@ async def persist_call_to_supabase(
                 if target_date.weekday() == 6:  # Sunday -> Monday
                     target_date = target_date + datetime.timedelta(days=1)
 
+                existing_appts = (await session.execute(
+                    select(Appointment.starts_at).where(
+                        Appointment.doctor_id == DEFAULT_DOCTOR_ID,
+                        Appointment.status != "cancelled"
+                    )
+                )).scalars().all()
+                existing_times = {a.astimezone(tz) for a in existing_appts}
+
+                slot_hour = 10
+                slot_min = 0
                 starts_at = datetime.datetime.combine(target_date, datetime.time(10, 0), tzinfo=tz)
+                while True:
+                    candidate = datetime.datetime.combine(target_date, datetime.time(slot_hour, slot_min), tzinfo=tz)
+                    if candidate not in existing_times:
+                        starts_at = candidate
+                        break
+                    slot_min += 15
+                    if slot_min >= 60:
+                        slot_min = 0
+                        slot_hour += 1
+                    if slot_hour >= 17:
+                        break
+
                 ends_at = starts_at + datetime.timedelta(minutes=15)
 
                 appt = Appointment(
@@ -266,7 +288,7 @@ async def persist_call_to_supabase(
                     status="booked",
                     source="voice_agent",
                     call_id=call_id,
-                    reason="Ayurvedic Consultation booked via voice assistant",
+                    reason=f"Ayurvedic Consultation with Dr. Manoj",
                 )
                 session.add(appt)
                 logger.info("Persisted confirmed appointment to Supabase for %s at %s", patient_name, starts_at)
@@ -747,7 +769,7 @@ async def handle_exotel_voicebot_websocket(websocket: WebSocket) -> None:
                     "transcript": session_transcript,
                 }
                 save_live_call(call_record)
-                asyncio.create_task(persist_call_to_supabase(call_record, session_transcript, DEFAULT_CLINIC_ID))
+                await persist_call_to_supabase(call_record, session_transcript, DEFAULT_CLINIC_ID)
                 logger.info("Persisted live call record %s (%s, outcome=%s)", record_id, patient_name, outcome)
             except Exception as e:
                 logger.error("Error saving call record or audio: %s", e)
