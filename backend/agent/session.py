@@ -142,10 +142,11 @@ class CallSession:
             reply_text = reply_text.replace("[END_CALL]", "").strip()
             is_hangup = True
 
-        farewell_phrases = ["ശരി", "നന്ദി", "ഓക്കേ", "ഓകെ", "താങ്ക് യു", "താങ്ക്സ്", "ബൈ", "bye", "thank you", "thanks", "ok", "okay", "കാണാം"]
+        farewell_phrases = ["ബൈ", "bye", "വിളിച്ചതിന് നന്ദി", "ഇനി ഒന്നും വേണ്ട"]
         clean_caller = caller_text.strip().lower().replace(".", "").replace("!", "")
         user_turn_count = len([m for m in self.messages if m["role"] == "user"])
-        if user_turn_count >= 2 and any(clean_caller == p or clean_caller == f"ശരി {p}" or clean_caller == f"{p} നന്ദി" for p in farewell_phrases):
+        # Never hangup on acknowledgment words like 'ശരി' or 'ഓക്കേ'
+        if user_turn_count >= 3 and any(p in clean_caller for p in farewell_phrases):
             is_hangup = True
             if not reply_text or len(reply_text) < 5:
                 reply_text = "നന്ദി! ശ്രീരുദ്ര ആയുർവേദ ഹോസ്പിറ്റലിലേക്ക് വിളിച്ചതിന് നന്ദി, നല്ലൊരു ദിവസം ആശംസിക്കുന്നു!"

@@ -402,15 +402,16 @@ async def handle_exotel_voicebot_websocket(websocket: WebSocket) -> None:
 
     caller_pcm_buffer: list[bytes] = []
     has_spoken = False
-    is_speaking = False
+    is_speaking = True  # Start in speaking state so caller buffer ignores initial carrier noise
     is_processing_turn = False
-    is_greeting = False
+    is_greeting = True
     was_interrupted = False
     silence_timer_task: asyncio.Task | None = None
     speech_start_time: float = 0.0
+    playback_lock = asyncio.Lock()  # Strictly prevent two audio streams from playing simultaneously
 
-    SPEECH_RMS_THRESHOLD = 260.0  # Clear speech above telephone carrier floor
-    SILENCE_RMS_THRESHOLD = 190.0
+    SPEECH_RMS_THRESHOLD = 320.0  # Clear speech threshold above phone carrier noise
+    SILENCE_RMS_THRESHOLD = 210.0
 
     async def stream_audio_to_caller(raw_pcm: bytes, sid: str, is_welcome: bool = False) -> None:
         """Stream 8kHz 16-bit PCM chunks to Exotel with jitter pre-buffering."""
@@ -461,6 +462,8 @@ async def handle_exotel_voicebot_websocket(websocket: WebSocket) -> None:
 
         is_speaking = False
         is_greeting = False
+        # Clear caller buffer when bot finishes speaking to eliminate acoustic echo
+        caller_pcm_buffer.clear()
         logger.info("Exotel Voicebot: Audio playback completed for StreamSid=%s.", sid)
 
     async def process_caller_speech() -> None:
@@ -543,31 +546,26 @@ async def handle_exotel_voicebot_websocket(websocket: WebSocket) -> None:
             first_audio = await providers.tts.synthesize(first_sentence, language="ml-IN")
             logger.info("First sentence TTS ready in %.2fs (%d chars, %d bytes)", time.time() - t_tts, len(first_sentence), len(first_audio))
 
-            if first_audio and stream_sid and not was_interrupted:
-                pcm_first = _to_raw_pcm(first_audio)
-                session_audio_chunks.append(pcm_first)
-                await stream_audio_to_caller(pcm_first, stream_sid, is_welcome=False)
+            async with playback_lock:
+                if first_audio and stream_sid and not was_interrupted:
+                    pcm_first = _to_raw_pcm(first_audio)
+                    session_audio_chunks.append(pcm_first)
+                    await stream_audio_to_caller(pcm_first, stream_sid, is_welcome=False)
 
-            # Stream remaining sentences smoothly if caller hasn't interrupted
-            if rest_task and stream_sid and not was_interrupted:
-                rest_audio = await rest_task
-                if rest_audio and not was_interrupted:
-                    pcm_rest = _to_raw_pcm(rest_audio)
-                    session_audio_chunks.append(pcm_rest)
-                    await stream_audio_to_caller(pcm_rest, stream_sid, is_welcome=False)
+                # Stream remaining sentences smoothly if caller hasn't interrupted
+                if rest_task and stream_sid and not was_interrupted:
+                    rest_audio = await rest_task
+                    if rest_audio and not was_interrupted:
+                        pcm_rest = _to_raw_pcm(rest_audio)
+                        session_audio_chunks.append(pcm_rest)
+                        await stream_audio_to_caller(pcm_rest, stream_sid, is_welcome=False)
 
             session_transcript.append({"speaker": "Agent", "text": reply_text})
 
-            # If the conversation turn signaled call completion (hangup), gracefully terminate call
+            # Keep call alive - never hang up on the patient, let caller hang up when done
             turn_type = result.get("type", "speech")
-            if turn_type == "hangup" and stream_sid:
-                logger.info("Exotel Voicebot: Turn completed with hangup. Closing WebSocket to disconnect call.")
-                await asyncio.sleep(0.6)
-                try:
-                    await websocket.close()
-                except Exception:
-                    pass
-                return
+            if turn_type == "hangup":
+                logger.info("Exotel Voicebot: Turn completed. Keeping session open for any further questions.")
 
         except Exception as e:
             logger.error("Exotel Voicebot: Error during conversation turn: %s", e)
@@ -632,8 +630,13 @@ async def handle_exotel_voicebot_websocket(websocket: WebSocket) -> None:
                         "speaker": "Agent",
                         "text": "നമസ്കാരം, ശ്രീരുദ്ര ആയുർവേദ ആശുപത്രിയിലേക്ക് സ്വാഗതം. ഞാൻ ഒരു AI അസിസ്റ്റന്റാണ്. ഈ കോൾ ഗുണനിലവാരത്തിനായി റെക്കോർഡ് ചെയ്യപ്പെടുന്നുണ്ട്. ഇന്ന് ഞാൻ നിങ്ങളെ എങ്ങനെയാണ് സഹായിക്കേണ്ടത്?"
                     })
-                    await asyncio.sleep(0.2)
-                    asyncio.create_task(stream_audio_to_caller(pcm_greeting, stream_sid, is_welcome=True))
+                    is_speaking = True
+                    is_greeting = True
+                    caller_pcm_buffer.clear()
+                    async def _play_welcome():
+                        async with playback_lock:
+                            await stream_audio_to_caller(pcm_greeting, stream_sid, is_welcome=True)
+                    asyncio.create_task(_play_welcome())
 
             elif event == "media":
                 if is_processing_turn:
