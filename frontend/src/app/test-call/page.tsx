@@ -239,7 +239,8 @@ export default function TestCallPage() {
         const rms = Math.sqrt(sumSquares / input.length) * 100;
         setVolumeLevel(Math.min(100, Math.round(rms * 4.5)));
 
-        const SPEECH_THRESHOLD = 2.2;
+        // Clear speech threshold above background room/fan noise
+        const SPEECH_THRESHOLD = 3.2;
         const isLoud = rms >= SPEECH_THRESHOLD;
 
         // User is actively speaking
@@ -258,22 +259,23 @@ export default function TestCallPage() {
           // Buffer audio chunk
           pcmChunksRef.current.push(new Float32Array(input));
 
-          // Cancel silence timer
+          // Cancel silence timer while caller continues speaking
           if (silenceTimerRef.current) {
             clearTimeout(silenceTimerRef.current);
             silenceTimerRef.current = null;
           }
         } else if (isSpeakingRef.current) {
-          // Caller paused: buffer chunk and monitor for end-of-speech silence (600ms)
+          // Caller paused: keep buffering audio while waiting for natural sentence completion
           pcmChunksRef.current.push(new Float32Array(input));
 
+          // Give a generous 1000ms (1.0s) natural breathing pause so sentences are never chopped in half!
           if (!silenceTimerRef.current) {
             silenceTimerRef.current = setTimeout(() => {
               isSpeakingRef.current = false;
               setIsUserSpeaking(false);
               silenceTimerRef.current = null;
               sendRecordedUtterance();
-            }, 600); // 600ms pause indicates natural end of sentence
+            }, 1000); // 1.0 second natural conversational cadence
           }
         }
       };
