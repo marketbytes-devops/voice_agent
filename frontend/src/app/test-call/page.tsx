@@ -16,7 +16,7 @@ import {
   CheckCircle2,
   Activity,
   AlertCircle,
-  HelpCircle,
+  Send,
 } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -29,83 +29,101 @@ interface TranscriptTurn {
   timestamp: string;
 }
 
+// 16kHz 16-bit Mono PCM WAV Encoder
+function writeString(view: DataView, offset: number, str: string) {
+  for (let i = 0; i < str.length; i++) {
+    view.setUint8(offset + i, str.charCodeAt(i));
+  }
+}
+
+function encodeWav(samples: Float32Array, sampleRate: number): ArrayBuffer {
+  const buffer = new ArrayBuffer(44 + samples.length * 2);
+  const view = new DataView(buffer);
+
+  writeString(view, 0, "RIFF");
+  view.setUint32(4, 36 + samples.length * 2, true);
+  writeString(view, 8, "WAVE");
+  writeString(view, 12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true); // Linear PCM
+  view.setUint16(22, 1, true); // Mono
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  writeString(view, 36, "data");
+  view.setUint32(40, samples.length * 2, true);
+
+  let offset = 44;
+  for (let i = 0; i < samples.length; i++) {
+    const s = Math.max(-1, Math.min(1, samples[i]));
+    view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+    offset += 2;
+  }
+  return buffer;
+}
+
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  let binary = "";
+  const bytes = new Uint8Array(buffer);
+  const len = bytes.byteLength;
+  for (let i = 0; i < len; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return window.btoa(binary);
+}
+
 export default function TestCallPage() {
   const [isConnected, setIsConnected] = useState(false);
   const [callState, setCallState] = useState<"idle" | "connecting" | "listening" | "transcribing" | "thinking" | "speaking">("idle");
-  const [isMuted, setIsMuted] = useState(false);
   const [transcripts, setTranscripts] = useState<TranscriptTurn[]>([]);
-  const [currentSpeakerText, setCurrentSpeakerText] = useState("");
-  const [isRecording, setIsRecording] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [volumeLevel, setVolumeLevel] = useState(0);
+  const [isUserSpeaking, setIsUserSpeaking] = useState(false);
+  const [textInput, setTextInput] = useState("");
 
   const socketRef = useRef<WebSocket | null>(null);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
   const audioContextRef = useRef<AudioContext | null>(null);
-  const analyserRef = useRef<AnalyserNode | null>(null);
-  const animFrameRef = useRef<number | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const processorRef = useRef<ScriptProcessorNode | null>(null);
   const activeAudioRef = useRef<HTMLAudioElement | null>(null);
   const transcriptEndRef = useRef<HTMLDivElement | null>(null);
 
-  // Auto-scroll transcript to bottom
+  // VAD and PCM recording refs
+  const pcmChunksRef = useRef<Float32Array[]>([]);
+  const isSpeakingRef = useRef(false);
+  const silenceTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const isAgentSpeakingRef = useRef(false);
+
+  // Auto-scroll transcript
   useEffect(() => {
     transcriptEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [transcripts, currentSpeakerText]);
+  }, [transcripts]);
 
-  // Clean up audio & websocket on unmount
+  // Clean up on unmount
   useEffect(() => {
     return () => {
       endCall();
     };
   }, []);
 
-  // Visualizer loop: monitor mic volume levels
-  const startVolumeMonitor = (stream: MediaStream) => {
-    try {
-      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-      const ctx = new AudioCtx();
-      audioContextRef.current = ctx;
-      const source = ctx.createMediaStreamSource(stream);
-      const analyser = ctx.createAnalyser();
-      analyser.fftSize = 256;
-      source.connect(analyser);
-      analyserRef.current = analyser;
-
-      const dataArray = new Uint8Array(analyser.frequencyBinCount);
-      const checkVolume = () => {
-        analyser.getByteFrequencyData(dataArray);
-        let sum = 0;
-        for (let i = 0; i < dataArray.length; i++) {
-          sum += dataArray[i];
-        }
-        const avg = sum / dataArray.length;
-        setVolumeLevel(Math.min(100, Math.round(avg * 1.8)));
-        animFrameRef.current = requestAnimationFrame(checkVolume);
-      };
-      checkVolume();
-    } catch (e) {
-      console.warn("Volume monitor init error:", e);
+  // Instant client-side barge-in: Stop AI audio immediately when user begins talking
+  const triggerBargeIn = useCallback(() => {
+    if (activeAudioRef.current && !activeAudioRef.current.paused) {
+      console.log("Client-side barge-in: Halting AI audio playback instantly.");
+      activeAudioRef.current.pause();
+      activeAudioRef.current = null;
+      isAgentSpeakingRef.current = false;
+      if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+        socketRef.current.send(JSON.stringify({ event: "user_interrupted" }));
+      }
     }
-  };
-
-  const stopVolumeMonitor = () => {
-    if (animFrameRef.current) {
-      cancelAnimationFrame(animFrameRef.current);
-      animFrameRef.current = null;
-    }
-    if (audioContextRef.current && audioContextRef.current.state !== "closed") {
-      audioContextRef.current.close().catch(() => {});
-      audioContextRef.current = null;
-    }
-    setVolumeLevel(0);
-  };
+  }, []);
 
   // Play audio WAV chunk received from Sarvam TTS
   const playAgentAudio = useCallback((base64Audio: string) => {
     if (!base64Audio) return;
     try {
-      // If previous audio is playing, halt it immediately
       if (activeAudioRef.current) {
         activeAudioRef.current.pause();
         activeAudioRef.current = null;
@@ -114,67 +132,74 @@ export default function TestCallPage() {
       const audioSrc = `data:audio/wav;base64,${base64Audio}`;
       const audio = new Audio(audioSrc);
       activeAudioRef.current = audio;
+      isAgentSpeakingRef.current = true;
       setCallState("speaking");
 
       audio.onended = () => {
-        setCallState("listening");
+        isAgentSpeakingRef.current = false;
         activeAudioRef.current = null;
-        startContinuousRecording();
+        setCallState("listening");
       };
 
       audio.onerror = () => {
-        setCallState("listening");
+        isAgentSpeakingRef.current = false;
         activeAudioRef.current = null;
-        startContinuousRecording();
+        setCallState("listening");
       };
 
       audio.play().catch((err) => {
         console.warn("Audio autoplay blocked or interrupted:", err);
+        isAgentSpeakingRef.current = false;
         setCallState("listening");
-        startContinuousRecording();
       });
     } catch (e) {
       console.error("Error playing audio chunk:", e);
+      isAgentSpeakingRef.current = false;
       setCallState("listening");
     }
   }, []);
 
-  // Handle client-side barge-in (interruption): stop AI voice immediately when user talks
-  const triggerBargeIn = () => {
-    if (activeAudioRef.current && !activeAudioRef.current.paused) {
-      console.log("Client-side barge-in triggered: stopping AI audio instantly.");
-      activeAudioRef.current.pause();
-      activeAudioRef.current = null;
-      if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
-        socketRef.current.send(JSON.stringify({ event: "user_interrupted" }));
-      }
-    }
-  };
+  // Send collected user speech WAV to backend
+  const sendRecordedUtterance = useCallback(() => {
+    if (pcmChunksRef.current.length === 0) return;
 
-  // Start continuous audio slice recording from microphone
-  const startContinuousRecording = async () => {
-    if (!mediaRecorderRef.current || isRecording) return;
-    try {
-      audioChunksRef.current = [];
-      mediaRecorderRef.current.start(200); // 200ms timeslices
-      setIsRecording(true);
-    } catch (e) {
-      console.warn("Could not start MediaRecorder slice:", e);
+    // Calculate total sample count
+    let totalLength = 0;
+    for (const chunk of pcmChunksRef.current) {
+      totalLength += chunk.length;
     }
-  };
 
-  // Stop recording and send audio payload to backend
-  const stopAndSendRecording = () => {
-    if (!mediaRecorderRef.current || !isRecording) return;
-    try {
-      mediaRecorderRef.current.stop();
-      setIsRecording(false);
-    } catch (e) {
-      console.warn("Could not stop MediaRecorder:", e);
+    // Ignore tiny audio blips (< 0.25 seconds at 16kHz)
+    if (totalLength < 16000 * 0.25) {
+      pcmChunksRef.current = [];
+      return;
     }
-  };
 
-  // Connect WebSocket & start live call
+    // Flatten chunks into a single Float32Array
+    const mergedSamples = new Float32Array(totalLength);
+    let offset = 0;
+    for (const chunk of pcmChunksRef.current) {
+      mergedSamples.set(chunk, offset);
+      offset += chunk.length;
+    }
+    pcmChunksRef.current = [];
+
+    // Encode to 16kHz 16-bit Mono WAV
+    const wavBuffer = encodeWav(mergedSamples, 16000);
+    const wavB64 = arrayBufferToBase64(wavBuffer);
+
+    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+      setCallState("transcribing");
+      socketRef.current.send(
+        JSON.stringify({
+          event: "user_audio",
+          audio_base64: wavB64,
+        })
+      );
+    }
+  }, []);
+
+  // Start Call & initialize Web Audio VAD
   const startCall = async () => {
     setErrorMessage(null);
     setCallState("connecting");
@@ -191,45 +216,72 @@ export default function TestCallPage() {
           autoGainControl: true,
         },
       });
+      streamRef.current = stream;
 
-      startVolumeMonitor(stream);
+      // 2. Setup AudioContext and PCM VAD Processor
+      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const ctx = new AudioCtx({ sampleRate: 16000 });
+      audioContextRef.current = ctx;
 
-      // Setup MediaRecorder
-      const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
-        ? "audio/webm;codecs=opus"
-        : "audio/webm";
-      const recorder = new MediaRecorder(stream, { mimeType });
-      mediaRecorderRef.current = recorder;
+      const source = ctx.createMediaStreamSource(stream);
+      // 4096 buffer size = ~256ms audio slices at 16kHz
+      const processor = ctx.createScriptProcessor(4096, 1, 1);
+      processorRef.current = processor;
 
-      recorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          audioChunksRef.current.push(event.data);
+      processor.onaudioprocess = (e) => {
+        const input = e.inputBuffer.getChannelData(0);
+
+        // Calculate Root Mean Square (RMS) volume
+        let sumSquares = 0;
+        for (let i = 0; i < input.length; i++) {
+          sumSquares += input[i] * input[i];
+        }
+        const rms = Math.sqrt(sumSquares / input.length) * 100;
+        setVolumeLevel(Math.min(100, Math.round(rms * 4.5)));
+
+        const SPEECH_THRESHOLD = 2.2;
+        const isLoud = rms >= SPEECH_THRESHOLD;
+
+        // User is actively speaking
+        if (isLoud) {
+          // If agent was speaking, interrupt immediately!
+          if (isAgentSpeakingRef.current) {
+            triggerBargeIn();
+          }
+
+          if (!isSpeakingRef.current) {
+            isSpeakingRef.current = true;
+            setIsUserSpeaking(true);
+            setCallState("listening");
+          }
+
+          // Buffer audio chunk
+          pcmChunksRef.current.push(new Float32Array(input));
+
+          // Cancel silence timer
+          if (silenceTimerRef.current) {
+            clearTimeout(silenceTimerRef.current);
+            silenceTimerRef.current = null;
+          }
+        } else if (isSpeakingRef.current) {
+          // Caller paused: buffer chunk and monitor for end-of-speech silence (600ms)
+          pcmChunksRef.current.push(new Float32Array(input));
+
+          if (!silenceTimerRef.current) {
+            silenceTimerRef.current = setTimeout(() => {
+              isSpeakingRef.current = false;
+              setIsUserSpeaking(false);
+              silenceTimerRef.current = null;
+              sendRecordedUtterance();
+            }, 600); // 600ms pause indicates natural end of sentence
+          }
         }
       };
 
-      recorder.onstop = async () => {
-        if (audioChunksRef.current.length === 0) return;
-        const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
-        audioChunksRef.current = [];
+      source.connect(processor);
+      processor.connect(ctx.destination);
 
-        // If audio blob is larger than 1.5KB (real speech), send to Sarvam STT
-        if (audioBlob.size > 1500 && socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
-          setCallState("transcribing");
-          const reader = new FileReader();
-          reader.onloadend = () => {
-            const base64Data = (reader.result as string).split(",")[1];
-            socketRef.current?.send(
-              JSON.stringify({
-                event: "user_audio",
-                audio_base64: base64Data,
-              })
-            );
-          };
-          reader.readAsDataURL(audioBlob);
-        }
-      };
-
-      // 2. Connect WebSocket to backend
+      // 3. Connect WebSocket to backend
       const wsUrl =
         typeof window !== "undefined" && window.location.hostname === "localhost"
           ? "ws://localhost:8000/api/voice/web-call"
@@ -263,7 +315,6 @@ export default function TestCallPage() {
             setCallState("thinking");
           } else if (ev === "agent_speech") {
             const replyText = data.text || "";
-            setCurrentSpeakerText(replyText);
             setTranscripts((prev) => [
               ...prev,
               {
@@ -288,14 +339,13 @@ export default function TestCallPage() {
 
       ws.onerror = (err) => {
         console.error("WebSocket error:", err);
-        setErrorMessage("Could not connect to voice server. Please verify backend is running.");
+        setErrorMessage("Could not connect to voice server. Verify backend is running.");
         endCall();
       };
 
       ws.onclose = () => {
         setIsConnected(false);
         setCallState("idle");
-        stopVolumeMonitor();
       };
     } catch (err: unknown) {
       console.error("Microphone permission or connection failure:", err);
@@ -305,8 +355,16 @@ export default function TestCallPage() {
     }
   };
 
-  // End Call
+  // End Call & Cleanup
   const endCall = () => {
+    if (silenceTimerRef.current) {
+      clearTimeout(silenceTimerRef.current);
+      silenceTimerRef.current = null;
+    }
+    isSpeakingRef.current = false;
+    isAgentSpeakingRef.current = false;
+    pcmChunksRef.current = [];
+
     if (activeAudioRef.current) {
       activeAudioRef.current.pause();
       activeAudioRef.current = null;
@@ -318,26 +376,37 @@ export default function TestCallPage() {
       socketRef.current.close();
       socketRef.current = null;
     }
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
-      mediaRecorderRef.current.stop();
+    if (processorRef.current) {
+      processorRef.current.disconnect();
+      processorRef.current = null;
     }
-    stopVolumeMonitor();
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+    }
+    if (audioContextRef.current && audioContextRef.current.state !== "closed") {
+      audioContextRef.current.close().catch(() => {});
+      audioContextRef.current = null;
+    }
     setIsConnected(false);
-    setIsRecording(false);
+    setIsUserSpeaking(false);
+    setVolumeLevel(0);
     setCallState("idle");
   };
 
   // Push quick Malayalam test prompt via text
-  const sendQuickPrompt = (promptText: string) => {
+  const sendTextPrompt = (promptText: string) => {
+    if (!promptText.trim()) return;
     triggerBargeIn();
     if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
       setCallState("thinking");
       socketRef.current.send(
         JSON.stringify({
           event: "user_text",
-          text: promptText,
+          text: promptText.trim(),
         })
       );
+      setTextInput("");
     }
   };
 
@@ -350,11 +419,11 @@ export default function TestCallPage() {
             <h1 className="text-2xl font-bold text-white tracking-tight">AI Voice Receptionist Live Tester</h1>
             <Badge variant="success" className="gap-1.5 animate-pulse">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-              Live Microphone Mode
+              Automatic Voice Detection (VAD) Active
             </Badge>
           </div>
           <p className="text-sm text-slate-400 mt-1">
-            Test natural Malayalam conversations, human-like barge-in, Dr. Manoj’s calendar, and booking flows directly from your browser.
+            Speak naturally in Malayalam into your microphone. The AI will listen, interrupt on speech, and answer like a human.
           </p>
         </div>
 
@@ -392,37 +461,26 @@ export default function TestCallPage() {
         {/* Left Column: Visual Call Pod & Mic Control */}
         <div className="lg:col-span-1 space-y-6">
           <div className="p-6 rounded-2xl bg-slate-900/80 border border-slate-800 flex flex-col items-center justify-center text-center relative overflow-hidden">
-            {/* Background Glow */}
-            <div
-              className={`absolute inset-0 bg-gradient-to-b transition-opacity duration-700 pointer-events-none ${
-                callState === "speaking"
-                  ? "from-blue-600/15 via-transparent to-transparent opacity-100"
-                  : callState === "listening"
-                  ? "from-emerald-600/15 via-transparent to-transparent opacity-100"
-                  : callState === "thinking"
-                  ? "from-amber-600/15 via-transparent to-transparent opacity-100"
-                  : "opacity-0"
-              }`}
-            />
-
             {/* Central Animated Avatar */}
             <div className="relative my-6">
               <div
                 className={`w-28 h-28 rounded-full flex items-center justify-center transition-all duration-300 shadow-2xl ${
                   callState === "speaking"
                     ? "bg-blue-500 text-white shadow-blue-500/40 ring-8 ring-blue-500/20 scale-105"
+                    : isUserSpeaking
+                    ? "bg-emerald-500 text-white shadow-emerald-500/40 ring-8 ring-emerald-500/30 scale-110"
                     : callState === "listening"
-                    ? "bg-emerald-500 text-white shadow-emerald-500/40 ring-8 ring-emerald-500/20 scale-105"
-                    : callState === "thinking"
+                    ? "bg-slate-800 text-emerald-400 border border-emerald-500/30"
+                    : callState === "transcribing" || callState === "thinking"
                     ? "bg-amber-500 text-slate-950 shadow-amber-500/40 animate-pulse"
                     : "bg-slate-800 text-slate-400 border border-slate-700"
                 }`}
               >
                 {callState === "speaking" ? (
                   <Volume2 className="w-12 h-12 animate-pulse" />
-                ) : callState === "listening" ? (
-                  <Mic className="w-12 h-12" />
-                ) : callState === "thinking" ? (
+                ) : isUserSpeaking ? (
+                  <Mic className="w-12 h-12 animate-bounce" />
+                ) : callState === "transcribing" || callState === "thinking" ? (
                   <Activity className="w-12 h-12 animate-spin" />
                 ) : (
                   <Bot className="w-12 h-12" />
@@ -434,8 +492,8 @@ export default function TestCallPage() {
                 <div
                   className="absolute inset-0 rounded-full border-2 border-emerald-400 pointer-events-none transition-all duration-75"
                   style={{
-                    transform: `scale(${1 + volumeLevel / 120})`,
-                    opacity: volumeLevel > 10 ? 0.8 : 0.1,
+                    transform: `scale(${1 + volumeLevel / 90})`,
+                    opacity: volumeLevel > 8 ? 0.9 : 0.1,
                   }}
                 />
               )}
@@ -445,49 +503,38 @@ export default function TestCallPage() {
             <h3 className="text-lg font-bold text-white">
               {callState === "idle" && "Ready to Connect"}
               {callState === "connecting" && "Dialing Voice Engine..."}
-              {callState === "speaking" && "AI Receptionist Speaking"}
-              {callState === "listening" && "Listening to You..."}
-              {callState === "transcribing" && "Transcribing Malayalam..."}
+              {callState === "speaking" && "AI Receptionist Speaking..."}
+              {isUserSpeaking && "Listening to Your Voice..."}
+              {!isUserSpeaking && callState === "listening" && "Listening (Speak Freely)"}
+              {callState === "transcribing" && "Transcribing Malayalam (Sarvam STT)..."}
               {callState === "thinking" && "Checking Dr. Manoj's Calendar..."}
             </h3>
             <p className="text-xs text-slate-400 mt-1 max-w-[240px]">
               {callState === "idle" && "Click Start Live Voice Call to open microphone."}
-              {callState === "speaking" && "Tip: Start talking anytime to test instant barge-in interruption!"}
-              {callState === "listening" && "Speak naturally in Malayalam or English into your microphone."}
-              {callState === "transcribing" && "Processing audio via Sarvam Saaras v3."}
-              {callState === "thinking" && "Executing tools & querying Supabase."}
+              {callState === "speaking" && "Tip: Start talking anytime to interrupt the AI immediately!"}
+              {isUserSpeaking && "We detect your voice! Pause when you finish speaking."}
+              {!isUserSpeaking && callState === "listening" && "Microphone is on. Speak naturally in Malayalam."}
+              {callState === "transcribing" && "Processing your speech via Saaras v3."}
+              {callState === "thinking" && "Querying Supabase doctors and appointments."}
             </p>
 
-            {/* Interactive Speech Trigger Buttons */}
+            {/* Live Volume Meter Bar */}
             {isConnected && (
-              <div className="w-full mt-6 pt-6 border-t border-slate-800/80 space-y-3">
-                <Button
-                  onMouseDown={() => {
-                    triggerBargeIn();
-                    startContinuousRecording();
-                  }}
-                  onMouseUp={() => {
-                    stopAndSendRecording();
-                  }}
-                  onTouchStart={() => {
-                    triggerBargeIn();
-                    startContinuousRecording();
-                  }}
-                  onTouchEnd={() => {
-                    stopAndSendRecording();
-                  }}
-                  className={`w-full py-3.5 rounded-xl font-semibold gap-2 transition-all ${
-                    isRecording
-                      ? "bg-rose-600 hover:bg-rose-500 text-white ring-4 ring-rose-500/20 scale-95"
-                      : "bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700"
-                  }`}
-                >
-                  <Mic className={`w-4 h-4 ${isRecording ? "animate-pulse text-white" : "text-emerald-400"}`} />
-                  {isRecording ? "Release to Send Speech..." : "Hold to Speak (or Talk Freely)"}
-                </Button>
-                <p className="text-[11px] text-slate-500 text-center">
-                  Microphone is active. Speak clearly or hold button.
-                </p>
+              <div className="w-full mt-6 pt-4 border-t border-slate-800 space-y-2">
+                <div className="flex justify-between text-[11px] text-slate-400">
+                  <span>Microphone Input Level</span>
+                  <span className={volumeLevel > 8 ? "text-emerald-400 font-semibold" : "text-slate-500"}>
+                    {volumeLevel > 8 ? "Voice Detected" : "Quiet"}
+                  </span>
+                </div>
+                <div className="w-full h-2 rounded-full bg-slate-800 overflow-hidden">
+                  <div
+                    className={`h-full transition-all duration-75 ${
+                      volumeLevel > 8 ? "bg-emerald-400 shadow-sm shadow-emerald-400/50" : "bg-slate-600"
+                    }`}
+                    style={{ width: `${Math.min(100, volumeLevel * 1.5)}%` }}
+                  />
+                </div>
               </div>
             )}
           </div>
@@ -525,7 +572,7 @@ export default function TestCallPage() {
                 <button
                   key={idx}
                   disabled={!isConnected}
-                  onClick={() => sendQuickPrompt(p.ml)}
+                  onClick={() => sendTextPrompt(p.ml)}
                   className="w-full text-left p-2.5 rounded-xl bg-slate-800/60 hover:bg-slate-800 border border-slate-700/60 hover:border-emerald-500/40 text-xs transition-all disabled:opacity-40 disabled:cursor-not-allowed group"
                 >
                   <div className="text-slate-200 font-medium group-hover:text-emerald-400 transition-colors">
@@ -538,7 +585,7 @@ export default function TestCallPage() {
           </div>
         </div>
 
-        {/* Right Column: Live Turn-by-Turn Transcript & Telemetry */}
+        {/* Right Column: Live Turn-by-Turn Transcript & Text Input */}
         <div className="lg:col-span-2 rounded-2xl bg-slate-900/80 border border-slate-800 flex flex-col h-[650px] overflow-hidden">
           {/* Transcript Header */}
           <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/40">
@@ -617,15 +664,32 @@ export default function TestCallPage() {
             <div ref={transcriptEndRef} />
           </div>
 
-          {/* Footer Call Info */}
-          <div className="p-3 bg-slate-950/60 border-t border-slate-800 text-xs text-slate-400 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <ShieldCheck className="w-4 h-4 text-emerald-400" />
-              <span>Full Medical Guardrails Active (No Prescriptions / Emergency Escalation Enforced)</span>
-            </div>
-            <div className="text-[11px] text-slate-500">
-              Supabase DB: <span className="text-emerald-400 font-medium">Mumbai Connected</span>
-            </div>
+          {/* Text Input Fallback Bar */}
+          <div className="p-3 bg-slate-950/80 border-t border-slate-800">
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                sendTextPrompt(textInput);
+              }}
+              className="flex items-center gap-2"
+            >
+              <input
+                type="text"
+                disabled={!isConnected}
+                value={textInput}
+                onChange={(e) => setTextInput(e.target.value)}
+                placeholder={isConnected ? "Or type your question in Malayalam/English..." : "Start call to talk or type..."}
+                className="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 disabled:opacity-40"
+              />
+              <Button
+                type="submit"
+                disabled={!isConnected || !textInput.trim()}
+                className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2.5 rounded-xl text-xs gap-1.5 font-semibold disabled:opacity-40"
+              >
+                <Send className="w-3.5 h-3.5" />
+                Send
+              </Button>
+            </form>
           </div>
         </div>
       </div>

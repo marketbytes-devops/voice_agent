@@ -416,3 +416,4 @@ async def handle_web_voice_call_websocket(websocket: WebSocket) -> None:
             _save_live_call(record)
             await _persist_call_to_supabase(record, session_transcript, DEFAULT_CLINIC_ID)
             logger.info("Web Voice Tester: Session successfully saved (ID: %s)", call_id)
+

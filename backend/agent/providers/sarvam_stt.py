@@ -34,7 +34,21 @@ class SarvamSTTAdapter:
 
         url = "https://api.sarvam.ai/speech-to-text"
         headers = {"api-subscription-key": self.api_key}
-        files = {"file": ("audio.wav", audio_data, "audio/wav")}
+
+        # Dynamically detect audio container format from magic bytes
+        filename = "audio.wav"
+        mime_type = "audio/wav"
+        if audio_data.startswith(b"\x1a\x45\xdf\xa3"):  # WebM / Matroska EBML header
+            filename = "audio.webm"
+            mime_type = "audio/webm"
+        elif audio_data.startswith(b"ID3") or audio_data.startswith(b"\xff\xfb"):
+            filename = "audio.mp3"
+            mime_type = "audio/mp3"
+        elif audio_data.startswith(b"OggS"):
+            filename = "audio.ogg"
+            mime_type = "audio/ogg"
+
+        files = {"file": (filename, audio_data, mime_type)}
         data = {"language_code": language, "model": "saaras:v3"}
 
         try:

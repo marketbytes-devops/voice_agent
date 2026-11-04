@@ -14,4 +14,6 @@ build/
 cloudflared.exe
 .pytest_cache/
 *.tsbuildinfo
+storage/recordings/
+storage/live_calls.json
 

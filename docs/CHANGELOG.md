@@ -7,6 +7,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Phase 8] - 2026-11-04
 ### Added
+- **Automatic Client-Side VAD & 16kHz WAV Encoding:** Implemented real-time Web Audio API voice activity detection (VAD) and in-memory 16-bit 16kHz linear PCM WAV encoder, enabling automatic speech transmission on 600ms pause without requiring button presses.
+- **Dynamic Audio Format Detection for Sarvam STT:** Added magic byte detection in `SarvamSTTAdapter` to dynamically identify WebM, WAV, MP3, and OGG formats before sending to Sarvam Saaras v3.
 - **Direct Live Web Voice Call Tester (Option A):** Built full-duplex WebSocket endpoint (`/api/voice/web-call`) and interactive web call studio (`frontend/src/app/test-call/page.tsx`), enabling zero-PIN, zero-delay testing directly with microphone and speakers.
 - **Client-Side Instant Barge-in:** Real-time audio halt in browser when user speaks during AI speech, synchronizing with Sarvam AI and Gemini.
 - **Interactive Testing Studio:** Live Malayalam transcript, visual voice activity meter, quick test prompts for Dr. Manoj's schedule, appointment bookings, treatment inquiries, and emergency escalation.
