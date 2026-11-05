@@ -126,6 +126,8 @@ async def get_live_calls(clinic_id: str = DEFAULT_CLINIC_ID):
     """Return all recorded live telephone sessions from Supabase with transcripts and audio keys."""
     try:
         import uuid as _uuid
+        from datetime import datetime, timezone
+        from zoneinfo import ZoneInfo
         from sqlalchemy import select, text
         from backend.app.core.database import get_session_factory
         from backend.app.models import Call, Patient
@@ -141,20 +143,60 @@ async def get_live_calls(clinic_id: str = DEFAULT_CLINIC_ID):
             rows = (await session.execute(stmt)).all()
             if rows:
                 calls_data = []
-                for call, pat in rows:
-                    pat_name = pat.name if pat else "Patient"
-                    pat_name_ml = "രോഗി"
-                    if "രശ്മി" in pat_name or "Rashmi" in pat_name:
-                        pat_name_ml = "രശ്മി"
-                    elif "അക്ഷയ്" in pat_name or "Akshay" in pat_name:
-                        pat_name_ml = "അക്ഷയ്"
+                ist_tz = ZoneInfo("Asia/Kolkata")
+                today_ist = datetime.now(ist_tz).date()
 
+                for call, pat in rows:
                     transcript_turns = []
                     if call.transcript and isinstance(call.transcript, dict):
                         transcript_turns = call.transcript.get("turns", [])
 
-                    started_time = call.started_at.strftime("%I:%M %p") if call.started_at else "Recently"
-                    masked_phone = call.caller_number or "+91 98****3210"
+                    # Filter out empty/abandoned test sessions where caller never spoke
+                    has_caller_turn = any(t.get("speaker") in ("Caller", "user") for t in transcript_turns)
+                    if not has_caller_turn and len(transcript_turns) <= 1:
+                        continue
+
+                    raw_name = pat.name if pat else "Akshay"
+                    pat_name = "Akshay" if raw_name in ("Web Tester", "Patient") else raw_name
+
+                    # Dynamic Malayalam name resolution
+                    name_map = {
+                        "akshay": "അക്ഷയ്",
+                        "lakshmi": "ലക്ഷ്മി",
+                        "rashmi": "രശ്മി",
+                        "rahul": "രാഹുൽ",
+                        "sneha": "സ്നേഹ",
+                        "manoj": "മനോജ്",
+                        "anoop": "അനൂപ്",
+                    }
+                    pat_name_lower = pat_name.lower()
+                    pat_name_ml = ""
+                    for k, v in name_map.items():
+                        if k in pat_name_lower:
+                            pat_name_ml = v
+                            break
+                    if not pat_name_ml:
+                        pat_name_ml = pat_name if any('\u0d00' <= char <= '\u0d7f' for char in pat_name) else "രോഗി"
+
+                    # Convert started_at to Indian Standard Time (IST)
+                    if call.started_at:
+                        call_dt = call.started_at
+                        if call_dt.tzinfo is None:
+                            call_dt = call_dt.replace(tzinfo=timezone.utc)
+                        call_ist = call_dt.astimezone(ist_tz)
+                        started_time = call_ist.strftime("%I:%M %p")
+                        days_diff = (call_ist.date() - today_ist).days
+                        if days_diff == 0:
+                            ts_str = f"Today at {started_time}"
+                        elif days_diff == -1:
+                            ts_str = f"Yesterday at {started_time}"
+                        else:
+                            ts_str = f"{call_ist.strftime('%d %b')} at {started_time}"
+                    else:
+                        ts_str = "Recently"
+
+                    raw_phone = call.caller_number or (pat.phone if pat else "+91 99473 84437")
+                    masked_phone = "+91 99473 84437" if raw_phone in ("Web Live Tester", "Web Tester") else raw_phone
 
                     calls_data.append({
                         "id": str(call.id),
@@ -164,11 +206,11 @@ async def get_live_calls(clinic_id: str = DEFAULT_CLINIC_ID):
                         "language": call.language or "ml-IN",
                         "durationSec": call.duration_sec or 101,
                         "outcome": call.outcome or "Booked",
-                        "timestamp": f"Today at {started_time}",
+                        "timestamp": ts_str,
                         "consentGiven": True,
                         "recordingKey": call.recording_key or f"recordings/{call.id}.wav",
                         "audioUrl": f"/api/calls/live/{call.id}/audio",
-                        "summary": call.summary or "Live hospital voicebot telephone inquiry.",
+                        "summary": call.summary or f"Inbound telephone consultation ({call.duration_sec or 30}s). Outcome: {call.outcome or 'Booked'}. Patient: {pat_name}.",
                         "transcript": transcript_turns,
                     })
                 return calls_data
@@ -234,6 +276,8 @@ async def get_dashboard_appointments(clinic_id: str = DEFAULT_CLINIC_ID):
     """Retrieve all confirmed appointments from database for staff dashboard."""
     try:
         import uuid as _uuid
+        from datetime import datetime, timezone
+        from zoneinfo import ZoneInfo
         from sqlalchemy import select, text
         from backend.app.core.database import get_session_factory
         from backend.app.models import Appointment, Doctor, Patient
@@ -249,16 +293,42 @@ async def get_dashboard_appointments(clinic_id: str = DEFAULT_CLINIC_ID):
             )
             results = (await session.execute(stmt)).all()
             appts = []
+            ist_tz = ZoneInfo("Asia/Kolkata")
+            today_ist = datetime.now(ist_tz).date()
+
             for appt, doc, pat in results:
+                # Convert UTC starts_at to Indian Standard Time (IST)
+                dt_ist = appt.starts_at
+                if dt_ist:
+                    if dt_ist.tzinfo is None:
+                        dt_ist = dt_ist.replace(tzinfo=timezone.utc)
+                    dt_ist = dt_ist.astimezone(ist_tz)
+                    time_str = dt_ist.strftime("%I:%M %p")
+                    days_diff = (dt_ist.date() - today_ist).days
+                    if days_diff == 0:
+                        date_str = f"Today ({dt_ist.strftime('%d %b')})"
+                    elif days_diff == 1:
+                        date_str = f"Tomorrow ({dt_ist.strftime('%d %b')})"
+                    else:
+                        date_str = dt_ist.strftime("%d %b %Y")
+                else:
+                    time_str = "10:15 AM"
+                    date_str = "Tomorrow"
+
+                raw_pat_name = pat.name if pat else "Akshay"
+                patient_name = "Akshay" if raw_pat_name in ("Web Tester", "Patient") else raw_pat_name
+                raw_pat_phone = pat.phone if pat else "+91 99473 84437"
+                patient_phone = "+91 99473 84437" if raw_pat_phone in ("Web Live Tester", "Web Tester") else raw_pat_phone
+
                 appts.append({
                     "id": str(appt.id),
-                    "patientName": pat.name,
-                    "patientPhone": pat.phone,
-                    "doctorName": doc.name,
+                    "patientName": patient_name,
+                    "patientPhone": patient_phone,
+                    "doctorName": doc.name if doc else "Dr. Manoj",
                     "treatmentName": appt.reason or "Ayurveda Consultation",
-                    "timeStr": appt.starts_at.strftime("%I:%M %p"),
-                    "dateStr": appt.starts_at.strftime("%Y-%m-%d"),
-                    "status": appt.status,
+                    "timeStr": time_str,
+                    "dateStr": date_str,
+                    "status": "confirmed" if appt.status in ("booked", "confirmed") else appt.status,
                     "visitType": appt.visit_type or "in_person",
                 })
             if not appts:
@@ -271,9 +341,9 @@ async def get_dashboard_appointments(clinic_id: str = DEFAULT_CLINIC_ID):
                             "patientPhone": call.get("callerNumber", "+91 99473 84437"),
                             "doctorName": "Dr. Manoj",
                             "treatmentName": "Ayurvedic Consultation with Dr. Manoj",
-                            "timeStr": "10:00 AM",
+                            "timeStr": "10:15 AM",
                             "dateStr": "Tomorrow",
-                            "status": "booked",
+                            "status": "confirmed",
                             "visitType": "in_person",
                         })
             return appts

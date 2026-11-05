@@ -57,7 +57,7 @@ export function CalendarGridSection({
         <table className="w-full text-left text-sm">
           <thead className="bg-slate-950/60 text-xs text-slate-400 uppercase font-semibold border-b border-slate-800">
             <tr>
-              <th className="px-4 py-3">Time</th>
+              <th className="px-4 py-3">Time & Date (IST)</th>
               <th className="px-4 py-3">Patient</th>
               <th className="px-4 py-3">Phone</th>
               <th className="px-4 py-3">Doctor</th>
@@ -81,8 +81,9 @@ export function CalendarGridSection({
             ) : (
               filtered.map((appt) => (
                 <tr key={appt.id} className="hover:bg-slate-900/40 transition-colors">
-                  <td className="px-4 py-3.5 font-bold font-mono text-emerald-400 whitespace-nowrap">
-                    {appt.timeStr}
+                  <td className="px-4 py-3.5 whitespace-nowrap">
+                    <span className="font-bold font-mono text-emerald-400 text-sm block">{appt.timeStr}</span>
+                    <span className="text-xs text-slate-400 font-sans">{appt.dateStr}</span>
                   </td>
                   <td className="px-4 py-3.5 font-semibold text-white">
                     {appt.patientName}

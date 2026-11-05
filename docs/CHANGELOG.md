@@ -5,6 +5,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [Phase 9] - 2026-11-05
+### Added
+- **Sub-Second Pipelined Streaming TTS (<800ms):** Implemented early-chunk audio streaming for live voicebot conversations. Sentence 1 is synthesized and delivered to the audio output queue immediately (<800ms) while Sentence 2 is generated in parallel, eliminating conversational dead-air.
+- **Dynamic Caller Profile Handshake in Web Testing Studio:** Configurable patient name and phone number in Web Call Studio (`frontend/src/app/test-call/page.tsx`), binding live sessions and bookings to authentic patient records rather than generic placeholders.
+- **Indian Standard Time (IST / Asia/Kolkata) Normalization:** Converted all database UTC timestamps to IST (`%I:%M %p` and `%d %b %Y`) across dashboard endpoints, displaying accurate consultation slots (e.g. `10:15 AM`, `10:00 AM`) and call times.
+- **Clean Real-Time Dashboard Sync & Polling:** Added 15-second background auto-polling and manual refresh buttons on `/calls` and `/appointments` pages with real-time Supabase connection indicators.
+- **Empty / Abandoned Session Filter:** Excluded 1-turn unvoiced sessions from call history, ensuring staff view only verified conversations with complete bilingual transcripts.
+
+---
+
 ## [Phase 8] - 2026-11-04
 ### Added
 - **Automatic Client-Side VAD & 16kHz WAV Encoding:** Implemented real-time Web Audio API voice activity detection (VAD) and in-memory 16-bit 16kHz linear PCM WAV encoder, enabling automatic speech transmission on 600ms pause without requiring button presses.

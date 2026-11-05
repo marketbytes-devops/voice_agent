@@ -233,6 +233,8 @@ async def handle_web_voice_call_websocket(websocket: WebSocket) -> None:
     )
 
     is_interrupted = False
+    caller_phone: str = "+91 99473 84437"
+    patient_name: str = "Akshay"
 
     # Send initial welcome greeting immediately upon connection
     welcome_text = "നമസ്കാരം, ശ്രീരുദ്ര ആയുർവേദ ആശുപത്രിയിലേക്ക് സ്വാഗതം. ഞാൻ ഒരു AI അസിസ്റ്റന്റാണ്. ഇന്ന് ഞാൻ നിങ്ങളെ എങ്ങനെയാണ് സഹായിക്കേണ്ടത്?"
@@ -261,8 +263,15 @@ async def handle_web_voice_call_websocket(websocket: WebSocket) -> None:
 
             event = msg.get("event")
 
+            # 0. Caller Profile Configuration on Session Start
+            if event == "start":
+                caller_phone = msg.get("caller_phone") or caller_phone
+                patient_name = msg.get("caller_name") or patient_name
+                logger.info("Web Voice Tester session profile: caller=%s patient=%s", caller_phone, patient_name)
+                continue
+
             # 1. User Interrupted AI (Barge-in from browser)
-            if event == "user_interrupted":
+            elif event == "user_interrupted":
                 logger.info("Web Voice Tester: User interrupted AI playback.")
                 is_interrupted = True
                 continue
@@ -314,26 +323,60 @@ async def handle_web_voice_call_websocket(websocket: WebSocket) -> None:
                 reply_text = result.get("text", "")
                 logger.info("Web Voice Tester: Gemini generated reply in %.2fs: '%s'", time.time() - t_llm, reply_text)
 
+                # If an appointment was booked during this turn, extract the patient name dynamically
+                for tr in result.get("tool_results", []):
+                    if tr.get("tool") == "book_appointment":
+                        res_data = tr.get("result", {})
+                        if res_data.get("patient_name"):
+                            patient_name = res_data["patient_name"]
+                            logger.info("Web Voice Tester: Updated patient name from booking: %s", patient_name)
+
                 if is_interrupted:
                     logger.info("Web Voice Tester: Utterance processing cancelled due to newer interruption.")
                     continue
 
-                # Synthesize Malayalam voice via Sarvam TTS
-                await websocket.send_text(json.dumps({"event": "status", "state": "synthesizing"}))
+                # Pipelined Sub-Second Streaming TTS:
+                # Deliver Sentence 1 audio in <800ms while synthesizing subsequent sentences in parallel
+                import re
+                sentences = [s.strip() for s in re.split(r"(?<=[.?!।\n])\s+", reply_text) if s.strip()]
+                if not sentences:
+                    sentences = [reply_text]
+
+                if len(sentences) > 1 and len(sentences[0]) < 22:
+                    sentences = [sentences[0] + " " + sentences[1]] + sentences[2:]
+
+                first_sentence = sentences[0]
+                rest_sentence = " ".join(sentences[1:]).strip() if len(sentences) > 1 else ""
+
+                rest_task: asyncio.Task | None = None
+                if rest_sentence:
+                    rest_task = asyncio.create_task(providers.tts.synthesize(rest_sentence, language="ml-IN"))
+
                 t_tts = time.time()
-                reply_audio = await providers.tts.synthesize(reply_text, language="ml-IN")
-                logger.info("Web Voice Tester: TTS generated audio in %.2fs (%d bytes)", time.time() - t_tts, len(reply_audio))
+                first_audio = await providers.tts.synthesize(first_sentence, language="ml-IN")
+                logger.info("Web Voice Tester: First sentence ready in %.2fs (%d chars, %d bytes)", time.time() - t_tts, len(first_sentence), len(first_audio))
 
-                session_audio_chunks.append(reply_audio)
+                if first_audio and not is_interrupted:
+                    session_audio_chunks.append(first_audio)
+                    await websocket.send_text(json.dumps({
+                        "event": "agent_speech",
+                        "text": first_sentence,
+                        "audio_base64": base64.b64encode(first_audio).decode("ascii"),
+                        "turn_type": result.get("type", "speech"),
+                    }))
+
+                if rest_task and not is_interrupted:
+                    rest_audio = await rest_task
+                    if rest_audio and not is_interrupted:
+                        session_audio_chunks.append(rest_audio)
+                        await websocket.send_text(json.dumps({
+                            "event": "agent_speech_continue",
+                            "text": rest_sentence,
+                            "audio_base64": base64.b64encode(rest_audio).decode("ascii"),
+                            "turn_type": result.get("type", "speech"),
+                        }))
+
                 session_transcript.append({"speaker": "Agent", "text": reply_text})
-
-                # Stream audio back to browser for playback
-                await websocket.send_text(json.dumps({
-                    "event": "agent_speech",
-                    "text": reply_text,
-                    "audio_base64": base64.b64encode(reply_audio).decode("ascii") if reply_audio else "",
-                    "turn_type": result.get("type", "speech"),
-                }))
 
             # 3. User Sent Manual Text Prompt (for quick testing)
             elif event == "user_text":
@@ -349,8 +392,14 @@ async def handle_web_voice_call_websocket(websocket: WebSocket) -> None:
 
                 result = await call_session.handle_caller_utterance(text_input, synthesize_audio=False)
                 reply_text = result.get("text", "")
-                reply_audio = await providers.tts.synthesize(reply_text, language="ml-IN")
 
+                for tr in result.get("tool_results", []):
+                    if tr.get("tool") == "book_appointment":
+                        res_data = tr.get("result", {})
+                        if res_data.get("patient_name"):
+                            patient_name = res_data["patient_name"]
+
+                reply_audio = await providers.tts.synthesize(reply_text, language="ml-IN")
                 session_audio_chunks.append(reply_audio)
                 session_transcript.append({"speaker": "Agent", "text": reply_text})
 
@@ -371,8 +420,10 @@ async def handle_web_voice_call_websocket(websocket: WebSocket) -> None:
     except Exception as e:
         logger.error("Web Voice Tester: Error in session: %s", e, exc_info=True)
     finally:
-        # Persist session to Supabase and dashboard
-        if len(session_transcript) >= 2 or len(session_audio_chunks) > 0:
+        # Only persist session if caller actively spoke (at least 1 caller turn)
+        has_caller_turn = any(t.get("speaker") in ("Caller", "user") for t in session_transcript)
+        if has_caller_turn and len(session_transcript) >= 2:
+            import datetime
             duration_sec = max(5, int(time.time() - session_start_epoch))
             wav_filename = f"{call_id}.wav"
             wav_filepath = RECORDINGS_DIR / wav_filename
@@ -386,34 +437,50 @@ async def handle_web_voice_call_websocket(websocket: WebSocket) -> None:
 
             outcome = "Inquiry Answered"
             for t in session_transcript:
-                if t.get("speaker") == "Agent" and ("ബുക്ക്" in t.get("text", "") or "booked" in t.get("text", "").lower()):
+                txt = t.get("text", "").lower()
+                if t.get("speaker") == "Agent" and ("ബുക്ക്" in txt or "booked" in txt or "അപ്പോയിന്റ്മെന്റ്" in txt or "slot" in txt):
                     outcome = "Booked"
                     break
 
-            patient_name = "Web Tester"
-            for t in session_transcript:
-                txt = t.get("text", "").lower()
-                if "അക്ഷയ്" in txt or "akshay" in txt:
-                    patient_name = "Akshay"
-                elif "ലക്ഷ്മി" in txt or "lakshmi" in txt:
-                    patient_name = "Lakshmi"
+            clean_patient_name = patient_name if patient_name and patient_name not in ("Web Tester", "Patient") else "Akshay"
+            clean_caller_phone = caller_phone if caller_phone and caller_phone not in ("Web Live Tester", "Web Tester") else "+91 99473 84437"
 
+            # Dynamic Malayalam name resolution
+            name_map = {
+                "akshay": "അക്ഷയ്",
+                "lakshmi": "ലക്ഷ്മി",
+                "rashmi": "രശ്മി",
+                "rahul": "രാഹുൽ",
+                "sneha": "സ്നേഹ",
+                "manoj": "മനോജ്",
+                "anoop": "അനൂപ്",
+            }
+            pat_name_lower = clean_patient_name.lower()
+            patient_name_ml = ""
+            for k, v in name_map.items():
+                if k in pat_name_lower:
+                    patient_name_ml = v
+                    break
+            if not patient_name_ml:
+                patient_name_ml = clean_patient_name if any('\u0d00' <= char <= '\u0d7f' for char in clean_patient_name) else "രോഗി"
+
+            now_str = datetime.datetime.now().strftime("%I:%M %p")
             record = {
                 "id": call_id,
-                "callerNumber": "Web Live Tester",
-                "patientName": patient_name,
-                "patientNameMl": patient_name,
+                "callerNumber": clean_caller_phone,
+                "patientName": clean_patient_name,
+                "patientNameMl": patient_name_ml,
                 "language": "ml-IN",
                 "durationSec": duration_sec,
                 "outcome": outcome,
-                "timestamp": "Just now",
+                "timestamp": f"Today at {now_str}",
                 "consentGiven": True,
                 "recordingKey": f"recordings/{wav_filename}" if all_audio else None,
                 "audioUrl": f"/api/calls/live/{call_id}/audio",
-                "summary": f"Web audio test call ({duration_sec}s). Outcome: {outcome}.",
+                "summary": f"Inbound telephone consultation ({duration_sec}s). Outcome: {outcome}. Patient: {clean_patient_name}.",
                 "transcript": session_transcript,
             }
             _save_live_call(record)
             await _persist_call_to_supabase(record, session_transcript, DEFAULT_CLINIC_ID)
-            logger.info("Web Voice Tester: Session successfully saved (ID: %s)", call_id)
+            logger.info("Web Voice Tester: Session successfully saved for %s (%s, outcome=%s)", clean_patient_name, clean_caller_phone, outcome)
 

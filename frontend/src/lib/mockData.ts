@@ -57,7 +57,7 @@ export const MOCK_CLINIC = {
   name: "Sreerudra Ayurveda Hospital & Research Centre",
   location: "Alappuzha, Kerala",
   phone: "+91 477 225 1234",
-  virtualNumber: "+91 98765 00001",
+  virtualNumber: "09513886363",
   status: "Agent Live & Answering",
   todayCallsCount: 28,
   todayAppointmentsCount: 14,

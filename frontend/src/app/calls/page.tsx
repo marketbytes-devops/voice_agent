@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
-import { Phone } from "lucide-react";
+import React, { useState, useEffect, useCallback } from "react";
+import { Phone, RefreshCw } from "lucide-react";
 import {
   CallListSection,
   CallDetailPlayerSection,
@@ -14,32 +14,44 @@ export default function CallsPage() {
   const [selectedCall, setSelectedCall] = useState<CallRecord | null>(null);
   const [isLive, setIsLive] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
+
+  const fetchLiveCalls = useCallback(async (isBackground = false) => {
+    if (!isBackground) setIsLoading(true);
+    else setIsRefreshing(true);
+    try {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://voice-agent-pphb.onrender.com";
+      const res = await fetch(`${apiUrl}/api/calls/live`, { cache: "no-store" });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          setCalls(data);
+          setSelectedCall((prev) => {
+            if (!prev) return data.length > 0 ? data[0] : null;
+            const match = data.find((c) => c.id === prev.id);
+            return match || (data.length > 0 ? data[0] : null);
+          });
+          setIsLive(true);
+          setIsLoading(false);
+          setIsRefreshing(false);
+          return;
+        }
+      }
+    } catch (err) {
+      console.warn("Could not fetch live calls from API:", err);
+    }
+    setIsLive(true);
+    setIsLoading(false);
+    setIsRefreshing(false);
+  }, []);
 
   useEffect(() => {
-    async function fetchLiveCalls() {
-      try {
-        const apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://voice-agent-pphb.onrender.com";
-        const res = await fetch(`${apiUrl}/api/calls/live`, { cache: "no-store" });
-        if (res.ok) {
-          const data = await res.json();
-          if (Array.isArray(data)) {
-            setCalls(data);
-            setSelectedCall(data.length > 0 ? data[0] : null);
-            setIsLive(true);
-            setIsLoading(false);
-            return;
-          }
-        }
-      } catch (err) {
-        console.warn("Could not fetch live calls from API:", err);
-      }
-      setCalls([]);
-      setSelectedCall(null);
-      setIsLive(true);
-      setIsLoading(false);
-    }
     fetchLiveCalls();
-  }, []);
+    const interval = setInterval(() => {
+      fetchLiveCalls(true);
+    }, 15000);
+    return () => clearInterval(interval);
+  }, [fetchLiveCalls]);
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
@@ -50,12 +62,23 @@ export default function CallsPage() {
             Review patient calls, inspect bilingual transcripts, and verify recording consent logs.
           </p>
         </div>
-        {isLive && (
-          <div className="flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/30 px-3 py-1.5 rounded-full">
-            <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
-            <span className="text-xs text-emerald-400 font-medium">Supabase Database Connected ({calls.length} Calls)</span>
-          </div>
-        )}
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => fetchLiveCalls()}
+            disabled={isRefreshing || isLoading}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-slate-900 border border-slate-800 text-xs text-slate-300 hover:text-white hover:border-slate-700 transition"
+            title="Refresh Call History"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? "animate-spin text-emerald-400" : ""}`} />
+            <span>Refresh</span>
+          </button>
+          {isLive && (
+            <div className="flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/30 px-3 py-1.5 rounded-full">
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
+              <span className="text-xs text-emerald-400 font-medium">Supabase Database Connected ({calls.length} Calls)</span>
+            </div>
+          )}
+        </div>
       </div>
 
       {isLoading ? (

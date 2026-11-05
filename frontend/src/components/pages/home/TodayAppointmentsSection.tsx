@@ -79,7 +79,8 @@ export function TodayAppointmentsSection() {
               </div>
 
               <div className="text-right shrink-0">
-                <div className="text-sm font-bold text-slate-200">{appt.timeStr}</div>
+                <div className="text-sm font-bold text-slate-200 font-mono">{appt.timeStr}</div>
+                <div className="text-xs text-slate-400">{appt.dateStr}</div>
                 <Badge variant={appt.status === "confirmed" || appt.status === "booked" ? "success" : "warning"} className="mt-1">
                   {appt.status.toUpperCase()}
                 </Badge>

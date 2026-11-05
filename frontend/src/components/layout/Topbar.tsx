@@ -16,7 +16,7 @@ export function Topbar() {
         </div>
         <Badge variant="success" className="gap-1.5 hidden sm:inline-flex">
           <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-          Virtual Number: {MOCK_CLINIC.virtualNumber}
+          Active Reception Line: {MOCK_CLINIC.virtualNumber}
         </Badge>
       </div>
 

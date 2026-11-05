@@ -3,20 +3,18 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   Mic,
-  MicOff,
   PhoneCall,
   PhoneOff,
   Volume2,
-  VolumeX,
   Bot,
   User,
   Sparkles,
-  RotateCcw,
   ShieldCheck,
-  CheckCircle2,
   Activity,
   AlertCircle,
   Send,
+  UserCheck,
+  Phone,
 } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -82,11 +80,16 @@ export default function TestCallPage() {
   const [isUserSpeaking, setIsUserSpeaking] = useState(false);
   const [textInput, setTextInput] = useState("");
 
+  // Real Caller Identity Configuration
+  const [callerName, setCallerName] = useState("Akshay");
+  const [callerPhone, setCallerPhone] = useState("+91 99473 84437");
+
   const socketRef = useRef<WebSocket | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const processorRef = useRef<ScriptProcessorNode | null>(null);
   const activeAudioRef = useRef<HTMLAudioElement | null>(null);
+  const audioQueueRef = useRef<string[]>([]);
   const transcriptEndRef = useRef<HTMLDivElement | null>(null);
 
   // VAD and PCM recording refs
@@ -109,6 +112,7 @@ export default function TestCallPage() {
 
   // Instant client-side barge-in: Stop AI audio immediately when user begins talking
   const triggerBargeIn = useCallback(() => {
+    audioQueueRef.current = [];
     if (activeAudioRef.current && !activeAudioRef.current.paused) {
       console.log("Client-side barge-in: Halting AI audio playback instantly.");
       activeAudioRef.current.pause();
@@ -120,57 +124,63 @@ export default function TestCallPage() {
     }
   }, []);
 
-  // Play audio WAV chunk received from Sarvam TTS
-  const playAgentAudio = useCallback((base64Audio: string) => {
-    if (!base64Audio) return;
-    try {
-      if (activeAudioRef.current) {
-        activeAudioRef.current.pause();
-        activeAudioRef.current = null;
-      }
+  // Play queued audio chunks seamlessly (Sentence 1 -> Sentence 2 -> ...)
+  const playNextQueuedAudio = useCallback(() => {
+    if (audioQueueRef.current.length === 0) {
+      isAgentSpeakingRef.current = false;
+      activeAudioRef.current = null;
+      setCallState("listening");
+      return;
+    }
 
-      const audioSrc = `data:audio/wav;base64,${base64Audio}`;
+    const nextChunk = audioQueueRef.current.shift()!;
+    try {
+      const audioSrc = `data:audio/wav;base64,${nextChunk}`;
       const audio = new Audio(audioSrc);
       activeAudioRef.current = audio;
       isAgentSpeakingRef.current = true;
       setCallState("speaking");
 
       audio.onended = () => {
-        isAgentSpeakingRef.current = false;
-        activeAudioRef.current = null;
-        setCallState("listening");
+        playNextQueuedAudio();
       };
 
       audio.onerror = () => {
-        isAgentSpeakingRef.current = false;
-        activeAudioRef.current = null;
-        setCallState("listening");
+        playNextQueuedAudio();
       };
 
       audio.play().catch((err) => {
         console.warn("Audio autoplay blocked or interrupted:", err);
-        isAgentSpeakingRef.current = false;
-        setCallState("listening");
+        playNextQueuedAudio();
       });
     } catch (e) {
       console.error("Error playing audio chunk:", e);
-      isAgentSpeakingRef.current = false;
-      setCallState("listening");
+      playNextQueuedAudio();
     }
   }, []);
+
+  const queueAgentAudio = useCallback(
+    (base64Audio: string) => {
+      if (!base64Audio) return;
+      audioQueueRef.current.push(base64Audio);
+      if (!activeAudioRef.current || activeAudioRef.current.paused) {
+        playNextQueuedAudio();
+      }
+    },
+    [playNextQueuedAudio]
+  );
 
   // Send collected user speech WAV to backend
   const sendRecordedUtterance = useCallback(() => {
     if (pcmChunksRef.current.length === 0) return;
 
-    // Calculate total sample count
     let totalLength = 0;
     for (const chunk of pcmChunksRef.current) {
       totalLength += chunk.length;
     }
 
-    // Ignore tiny audio blips (< 0.25 seconds at 16kHz)
-    if (totalLength < 16000 * 0.25) {
+    // Ignore tiny audio blips (< 0.35 seconds at 16kHz)
+    if (totalLength < 16000 * 0.35) {
       pcmChunksRef.current = [];
       return;
     }
@@ -204,6 +214,7 @@ export default function TestCallPage() {
     setErrorMessage(null);
     setCallState("connecting");
     setTranscripts([]);
+    audioQueueRef.current = [];
 
     try {
       // 1. Request microphone access
@@ -224,14 +235,12 @@ export default function TestCallPage() {
       audioContextRef.current = ctx;
 
       const source = ctx.createMediaStreamSource(stream);
-      // 4096 buffer size = ~256ms audio slices at 16kHz
       const processor = ctx.createScriptProcessor(4096, 1, 1);
       processorRef.current = processor;
 
       processor.onaudioprocess = (e) => {
         const input = e.inputBuffer.getChannelData(0);
 
-        // Calculate Root Mean Square (RMS) volume
         let sumSquares = 0;
         for (let i = 0; i < input.length; i++) {
           sumSquares += input[i] * input[i];
@@ -239,13 +248,10 @@ export default function TestCallPage() {
         const rms = Math.sqrt(sumSquares / input.length) * 100;
         setVolumeLevel(Math.min(100, Math.round(rms * 4.5)));
 
-        // Clear speech threshold above background room/fan noise
         const SPEECH_THRESHOLD = 3.2;
         const isLoud = rms >= SPEECH_THRESHOLD;
 
-        // User is actively speaking
         if (isLoud) {
-          // If agent was speaking, interrupt immediately!
           if (isAgentSpeakingRef.current) {
             triggerBargeIn();
           }
@@ -256,26 +262,23 @@ export default function TestCallPage() {
             setCallState("listening");
           }
 
-          // Buffer audio chunk
           pcmChunksRef.current.push(new Float32Array(input));
 
-          // Cancel silence timer while caller continues speaking
           if (silenceTimerRef.current) {
             clearTimeout(silenceTimerRef.current);
             silenceTimerRef.current = null;
           }
         } else if (isSpeakingRef.current) {
-          // Caller paused: keep buffering audio while waiting for natural sentence completion
           pcmChunksRef.current.push(new Float32Array(input));
 
-          // Give a generous 1000ms (1.0s) natural breathing pause so sentences are never chopped in half!
+          // 1.0 second natural conversational cadence
           if (!silenceTimerRef.current) {
             silenceTimerRef.current = setTimeout(() => {
               isSpeakingRef.current = false;
               setIsUserSpeaking(false);
               silenceTimerRef.current = null;
               sendRecordedUtterance();
-            }, 1000); // 1.0 second natural conversational cadence
+            }, 1000);
           }
         }
       };
@@ -295,6 +298,15 @@ export default function TestCallPage() {
       ws.onopen = () => {
         setIsConnected(true);
         setCallState("connecting");
+
+        // Send caller identity on connection so database records real patient data
+        ws.send(
+          JSON.stringify({
+            event: "start",
+            caller_name: callerName.trim() || "Akshay",
+            caller_phone: callerPhone.trim() || "+91 99473 84437",
+          })
+        );
       };
 
       ws.onmessage = (event) => {
@@ -322,16 +334,21 @@ export default function TestCallPage() {
               {
                 id: `bot-${Date.now()}`,
                 speaker: "Agent",
-                text: replyText,
+                text: data.full_text || replyText,
                 turnType: data.turn_type,
                 timestamp: new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }),
               },
             ]);
 
             if (data.audio_base64) {
-              playAgentAudio(data.audio_base64);
+              audioQueueRef.current = [];
+              queueAgentAudio(data.audio_base64);
             } else {
               setCallState("listening");
+            }
+          } else if (ev === "agent_speech_continue") {
+            if (data.audio_base64) {
+              queueAgentAudio(data.audio_base64);
             }
           }
         } catch (e) {
@@ -365,6 +382,7 @@ export default function TestCallPage() {
     }
     isSpeakingRef.current = false;
     isAgentSpeakingRef.current = false;
+    audioQueueRef.current = [];
     pcmChunksRef.current = [];
 
     if (activeAudioRef.current) {
@@ -396,7 +414,7 @@ export default function TestCallPage() {
     setCallState("idle");
   };
 
-  // Push quick Malayalam test prompt via text
+  // Push manual prompt via text
   const sendTextPrompt = (promptText: string) => {
     if (!promptText.trim()) return;
     triggerBargeIn();
@@ -413,7 +431,7 @@ export default function TestCallPage() {
   };
 
   return (
-    <div className="p-8 max-w-6xl mx-auto space-y-8">
+    <div className="p-8 max-w-6xl mx-auto space-y-6">
       {/* Header Banner */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-6">
         <div>
@@ -421,11 +439,11 @@ export default function TestCallPage() {
             <h1 className="text-2xl font-bold text-white tracking-tight">AI Voice Receptionist Live Tester</h1>
             <Badge variant="success" className="gap-1.5 animate-pulse">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-              Automatic Voice Detection (VAD) Active
+              Sub-Second Streaming Active
             </Badge>
           </div>
           <p className="text-sm text-slate-400 mt-1">
-            Speak naturally in Malayalam into your microphone. The AI will listen, interrupt on speech, and answer like a human.
+            Test natural Malayalam conversations, human-like barge-in, Dr. Manoj’s calendar, and booking flows directly from your browser.
           </p>
         </div>
 
@@ -448,6 +466,45 @@ export default function TestCallPage() {
               End Call
             </Button>
           )}
+        </div>
+      </div>
+
+      {/* Real Caller Profile Bar (No More "Web Tester"!) */}
+      <div className="p-4 rounded-2xl bg-slate-900/90 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
+            <UserCheck className="w-5 h-5" />
+          </div>
+          <div>
+            <div className="text-xs font-semibold text-slate-200">Testing Patient Profile</div>
+            <div className="text-[11px] text-slate-400">Calls and bookings will save to Supabase under this profile</div>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3 text-xs">
+          <div className="flex items-center gap-1.5 bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5">
+            <User className="w-3.5 h-3.5 text-slate-400" />
+            <span className="text-slate-400">Name:</span>
+            <input
+              type="text"
+              disabled={isConnected}
+              value={callerName}
+              onChange={(e) => setCallerName(e.target.value)}
+              className="bg-transparent text-emerald-400 font-semibold focus:outline-none w-24 disabled:opacity-70"
+            />
+          </div>
+
+          <div className="flex items-center gap-1.5 bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5">
+            <Phone className="w-3.5 h-3.5 text-slate-400" />
+            <span className="text-slate-400">Phone:</span>
+            <input
+              type="text"
+              disabled={isConnected}
+              value={callerPhone}
+              onChange={(e) => setCallerPhone(e.target.value)}
+              className="bg-transparent text-emerald-400 font-mono font-semibold focus:outline-none w-36 disabled:opacity-70"
+            />
+          </div>
         </div>
       </div>
 
@@ -649,7 +706,7 @@ export default function TestCallPage() {
                         turn.speaker === "Caller" ? "justify-end" : "justify-start"
                       }`}
                     >
-                      <span>{turn.speaker === "Caller" ? "You (Patient)" : "AI Receptionist"}</span>
+                      <span>{turn.speaker === "Caller" ? `${callerName} (Patient)` : "AI Receptionist"}</span>
                       <span>•</span>
                       <span>{turn.timestamp}</span>
                       {turn.turnType && (
